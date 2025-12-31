@@ -1,0 +1,63 @@
+services:
+  # 1. The LLM Server (vLLM)
+  llm-server:
+    image: nvcr.io/nvidia/vllm:25.09-py3
+    container_name: gpt-server
+    runtime: nvidia
+    restart: always
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - /home/devmaster/.cache/huggingface:/root/.cache/huggingface
+      - /home/devmaster/tiktoken_cache:/app/tiktoken_cache
+    ports:
+      - "8000:8000"
+    command: >
+      vllm serve openai/gpt-oss-20b
+      --max-model-len 131072
+      --gpu-memory-utilization 0.70
+      --trust-remote-code
+      --enforce-eager
+
+  # 2. Milvus Vector DB (Arm64 GPU version)
+  milvus:
+    image: milvusdb/milvus:v2.5.0-gpu-arm64
+    container_name: milvus-standalone
+    runtime: nvidia
+    restart: always
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+    ports:
+      - "19530:19530"
+    depends_on:
+      - etcd
+      - minio
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+  minio:
+    image: minio/minio:latest
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data
+
+  # 3. Your RAG API
+  rag-api:
+    build:
+      context: ./app
+    container_name: rag-endpoint
+    environment:
+      - MILVUS_URL=http://milvus:19530
+      - VLLM_URL=http://llm-server:8000/v1
+    volumes:
+      - ./app:/app
+      - /home/devmaster/sop_documents:/documents
+    ports:
+      - "8080:8080"
+    depends_on:
+      - llm-server
+      - milvus
