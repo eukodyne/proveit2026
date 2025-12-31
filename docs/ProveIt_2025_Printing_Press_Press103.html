@@ -1,0 +1,332 @@
+Standard Operating Procedure (SOP) for Operating the Comexi F2 ML Flexographic Printing Press.
+This applies to "Press 103" equipment in the Unified Namespace (MQTT tag path "Enterprise/Dallas/Press/Press 103")
+
+1. Purpose
+
+This SOP outlines the procedures for operating the Comexi F2 ML Flexographic Printing Press, including both single-pass and two-pass printing processes, based on the specific requirements of the Stock Keeping Unit (SKU) and the Bill of Materials (BOM).
+
+2. Scope
+
+Applicable to all trained operators responsible for setting up, operating, and maintaining the Comexi F2 ML press in the production of flexible packaging materials.
+
+3. Responsibilities
+
+Operators: Ensure adherence to this SOP during press operations.
+
+Supervisors: Verify compliance and provide guidance as needed.
+
+4. Safety Precautions
+
+Always wear appropriate Personal Protective Equipment (PPE).
+
+Ensure all safety guards are in place before operating the press.
+
+Follow lockout/tagout procedures during maintenance.
+
+5. Equipment and Materials
+
+Comexi F2 ML Flexographic Printing Press
+
+Printing Plates: Prepared as per job specifications.
+
+Inks: As specified in the BOM.
+
+Substrate: As specified in the BOM.
+
+Cleaning Supplies
+
+6. Procedure
+
+6.1 Job Preparation
+
+Review Job Specifications: Examine the SKU and BOM to determine the number of colors and printing sequence required.
+
+Prepare Printing Plates: Ensure plates are correctly prepared and correspond to the job specifications.
+
+Ink Preparation: Mix and prepare inks as per the BOM.
+
+6.2 Press Setup
+
+Single-Pass Printing:
+
+Color Configuration: If the job requires up to 8 colors, set up the press for a single-pass operation.
+
+Plate Mounting: Mount the appropriate plates onto the plate cylinders.
+
+Ink Stations: Fill ink reservoirs with the specified inks.
+
+Substrate Loading: Load the substrate onto the unwinder.
+
+Registration and Calibration: Perform necessary alignments to ensure accurate print registration.
+
+Two-Pass Printing:
+
+First Pass Setup:
+
+Color Configuration: Set up the press to print the first set of colors (up to 8).
+
+Plate Mounting: Mount the corresponding plates.
+
+Ink Stations: Fill ink reservoirs with the specified inks for the first pass.
+
+Substrate Loading: Load the substrate onto the unwinder.
+
+Registration and Calibration: Perform necessary alignments.
+
+First Pass Printing:
+
+Start Printing: Initiate the printing process for the first set of colors.
+
+Monitor Quality: Continuously check for print quality and make adjustments as needed.
+
+Intermediate Handling:
+
+Unloading: After the first pass, rewind the printed substrate.
+
+Inspection: Inspect the printed substrate for any defects.
+
+Reorientation: If required, reorient the roll to ensure proper alignment for the second pass.
+
+Second Pass Setup:
+
+Color Configuration: Set up the press for the additional colors.
+
+Plate Mounting: Mount the plates for the second set of colors.
+
+Ink Stations: Prepare inks as specified for the second pass.
+
+Substrate Loading: Reload the substrate onto the unwinder.
+
+Registration and Calibration: Ensure precise alignment with the first pass print.
+
+Second Pass Printing:
+
+Start Printing: Proceed with printing the additional colors.
+
+Monitor Quality: Continuously check for print quality and registration accuracy.
+
+6.3 Post-Printing Procedures
+
+Drying: Ensure the printed substrate passes through the drying system to cure the inks.
+
+Quality Inspection: Conduct a thorough inspection to verify print quality and adherence to specifications.
+
+Rewinding: Rewind the finished product onto cores as specified.
+
+Cleanup: Clean all ink stations, plates, and other equipment used during the process.
+
+7. Troubleshooting
+
+Misregistration: Check plate mounting and substrate alignment.
+
+Ink Issues: Verify ink viscosity and compatibility with the substrate.
+
+Print Defects: Inspect plates for damage and ensure even ink distribution.
+
+8. Maintenance
+
+Perform routine maintenance as per the manufacturer's guidelines.
+
+Keep a log of maintenance activities and any issues encountered.
+
+9. Documentation
+
+Record all relevant production data, including job specifications, ink usage, substrate details, and any deviations from standard procedures.
+
+10. References
+
+Comexi F2 ML Operation Manual
+
+Safety Data Sheets (SDS) for all inks and solvents used
+
+11. Revision History
+
+Version 1.0: Initial release
+
+Version 1.1: Updated two-pass printing procedures
+
+12. Troubleshooting
+
+Operating the Comexi F2 ML flexographic printing press requires vigilance to maintain print quality and minimize downtime. Below is a guide to common printing issues, their potential causes, and recommended solutions:
+
+12.1. Bleeding/Smudging
+
+Appearance: The terms bleeding or smudging are used in situations when colored constituents of the printing ink become visible in parts of the motif which have not been printed. (The previous ink must be dry enough to be able to absorb the ink that is to be applied subsequently.)
+
+Image Example:
+
+Refer to image "ProveIt/Press103/Press103_Troubleshooting_BleedingSmudging.png" to see an example of bleeding/smudging.
+<img src="ProveIt/Press103/Press103_Troubleshooting_BleedingSmudging.png"/>
+
+Causes and Remedies:
+
+[
+  {
+    "cause": "Ink drying too slowly.",
+    "remedy": "Increase drying temperature or air flow to accelerate ink drying."
+  },
+  {
+    "cause": "Excessive ink application.",
+    "remedy": "Reduce ink film thickness by adjusting anilox roller or ink formulation."
+  },
+  {
+    "cause": "Incompatible ink and substrate.",
+    "remedy": "Ensure ink is suitable for the substrate being used."
+  },
+  {
+    "cause": "High ambient humidity.",
+    "remedy": "Control environmental conditions to maintain optimal humidity levels."
+  }
+]
+
+12.2 Troubleshooting - Bridging
+
+Appearance: Bridging occurs when adjacent design elements unintentionally connect due to ink spread, leading to a loss of detail and clarity in the printed image.
+
+Image Example:
+
+Refer to image "ProveIt/Press103/Press103_Troubleshooting_Bridging.png" to see an example of dot gain.
+<img src="ProveIt/Press103/Press103_Troubleshooting_Bridging.png"/>
+
+Causes and Remedies:
+[
+  {
+    "cause": "The relative humidity is too high. Water is condensing into the solvent-based inks.",
+    "remedy": "Replace with fresh ink. Adjust the solvent mixture. Increase the performance of the dryer between the printing units."
+  },
+  {
+    "cause": "The ink recipe is not suitable for the printed motif.",
+    "remedy": "Replace the ink."
+  },
+  {
+    "cause": "Incorrect selection of the solvent. The ink dries too quickly.",
+    "remedy": "Empty the ink tank and adjust the solvent mixture."
+  },
+  {
+    "cause": "The ink viscosity is too high.",
+    "remedy": "Reduce the viscosity."
+  },
+  {
+    "cause": "The transferred volume is too high.",
+    "remedy": "For the print job, select anilox rollers with a lower transferred volume."
+  },
+  {
+    "cause": "The anilox roller and width of the printing plate raster do not match.",
+    "remedy": "Use a finer anilox roller."
+  }
+]
+
+
+12.3 Troubleshooting - Blocking 
+
+Appearance: The ink adheres to the reverse side of the film and causes damage when the substrate is unrolled.
+
+Image Example:
+
+Refer to image "ProveIt/Press103/Press103_Troubleshooting_Blocking.png" to see an example of dot gain.
+<img src="ProveIt/Press103/Press103_Troubleshooting_Blocking.png"/>
+
+Causes and Remedies:
+[
+  {
+    "cause": "There is too much retarder in the ink.",
+    "remedy": "Replace the ink."
+  },
+  {
+    "cause": "The film temperature at the winder is too high.",
+    "remedy": "Reduce the temperature of the tunnel dryer and check whether the cooling drum is working."
+  },
+  {
+    "cause": "The pretreatment level of the film is too low.",
+    "remedy": "Check the pretreatment and the age of the film. Use the inline corona treatment."
+  },
+  {
+    "cause": "Ink drying is too slow.",
+    "remedy": "Increase the performance of the dryer. Use a faster drying solvent. Reduce the printing speed."
+  },
+  {
+    "cause": "The ink volume transferred is too high.",
+    "remedy": "Select anilox rollers with a lower transferred volume."
+  },
+  {
+    "cause": "The ink viscosity is too high.",
+    "remedy": "Reduce the ink viscosity by adding solvents."
+  },
+  {
+    "cause": "The cooling is not working.",
+    "remedy": "Please contact the service department."
+  },
+  {
+    "cause": "Excessive winding pressure at the winder.",
+    "remedy": "Reduce the winding pressure."
+  },
+  {
+    "cause": "The moisture of the wound web is too high.",
+    "remedy": "Increase the performance of the dryer between the printing mechanisms and reduce the cooling."
+  },
+  {
+    "cause": "Coating or pretreatment on both sides of the film.",
+    "remedy": "Check whether the correct ink system is being used."
+  }
+]
+
+
+12.4. Troubleshooting - Dot Gain
+
+Appearance: Dots are larger than expected – usual phenomenon observed in flexography which reduces the details and the contrast.
+
+Image Example:
+
+Refer to image "ProveIt/Press103/Press103_Troubleshooting_DotGainTooHigh.png" to see an example of dot gain.
+<img src="ProveIt/Press103/Press103_Troubleshooting_DotGainTooHigh.png"/>
+
+Video Example:
+
+Refer to the troubleshooting guide video "ProveIt/Press103/Press103_Troubleshooting_DotGainTooHigh.png" for details on remediation of dot gain.
+<video src="video/ProveIt/Press103/ProveIt_Troubleshooting_DotGain.mp4"></video>
+
+Causes and Remedies:
+
+[
+  {
+    "cause": "Excessive printing pressure.",
+    "remedy": "Adjust to a 'kiss' impression by reducing printing pressure."
+  },
+  {
+    "cause": "High ink viscosity.",
+    "remedy": "Ensure ink viscosity aligns with manufacturer recommendations."
+  },
+  {
+    "cause": "Inappropriate anilox roll specifications.",
+    "remedy": "Select an anilox roll with suitable cell volume and line screen for the job."
+  }
+]
+
+12.5. Troubleshooting - Misregistration (Inaccurate Register)
+
+Appearance: Misalignment of colors or design elements during printing, leading to blurred or overlapping images.
+
+Image Example:
+Refer to image "ProveIt/Press103/Press103_Troubleshooting_Register.png" to see an example of dot gain.
+<img src="ProveIt/Press103/Press103_Troubleshooting_Register.png"/>
+
+Causes and Remedies:
+
+[
+  {
+    "cause": "There is a difference in the speed between the plate and impression cylinder.",
+    "remedy": "Check the speed settings of the plate and impression cylinder to ensure they are synchronized."
+  },
+  {
+    "cause": "The printing plate is not mounted correctly.",
+    "remedy": "Verify that the printing plate is mounted accurately and securely."
+  },
+  {
+    "cause": "The substrate is stretching or contracting during printing.",
+    "remedy": "Ensure consistent web tension and consider using substrates with stable dimensional properties."
+  },
+  {
+    "cause": "The substrate reel is defective.",
+    "remedy": "Replace the reel of the substrate to ensure material integrity."
+  }
+]
