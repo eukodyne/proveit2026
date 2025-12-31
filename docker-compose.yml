@@ -21,7 +21,7 @@ services:
 
   # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
-    image: milvusdb/milvus:v2.5-latest
+    image: milvusdb/milvus:v2.5.1
     container_name: milvus-standalone
     restart: always
     environment:
