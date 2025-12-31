@@ -26,7 +26,7 @@ llm_client = OpenAI(base_url=VLLM_URL, api_key="token-not-needed")
 if not client.has_collection(COLLECTION_NAME):
     schema = client.create_schema(auto_id=True, enable_dynamic_field=True)
     schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True)
-    schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dimension=DIMENSION)
+    schema.add_field(field_name="vector", datatype=DataType.FLOAT_VECTOR, dim=DIMENSION)
     schema.add_field(field_name="text", datatype=DataType.VARCHAR, max_length=65535)
     schema.add_field(field_name="machine_id", datatype=DataType.VARCHAR, max_length=100)
 
