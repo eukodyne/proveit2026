@@ -21,8 +21,9 @@ services:
 
   # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
-    image: milvusdb/milvus:v2.5.1
+    image: milvusdb/milvus:v2.5.10-20250418-5a8c98a2-gpu-arm64
     container_name: milvus-standalone
+    runtime: nvidia
     restart: always
     environment:
       - ETCD_USE_EMBED=true
