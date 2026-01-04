@@ -1,29 +1,32 @@
 FROM nvcr.io/nvidia/vllm:25.12-py3
 
-# Set hardware architecture for Blackwell
+# Blackwell Environment
 ENV TORCH_CUDA_ARCH_LIST="12.0"
 ENV VLLM_INSTALL_PUNICA_KERNELS=1
 ENV MAX_JOBS=8
 ENV UV_BREAK_SYSTEM_PACKAGES=1
 
-# Hardcode the library paths
-ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
-
 USER root
-RUN apt-get update && apt-get install -y python3.12-dev cmake git ccache && rm -rf /var/lib/apt/lists/*
 
+# 1. Install CUDA 12 Runtime libraries (vLLM's dependency)
+# This provides the actual libcudart.so.12 without overwriting your CUDA 13.1
+RUN apt-get update && apt-get install -y \
+    cuda-cudart-12-4 \
+    python3.12-dev \
+    cmake \
+    git \
+    ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. Set Library Paths to see BOTH CUDA 13 and CUDA 12
+ENV LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda/lib64:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
+
+# 3. Upgrade vLLM
 RUN pip install uv --break-system-packages
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
-# --- THE "CUDA 13 TO 12" BRIDGE ---
-# We link your existing .13 libraries to the .12 names vLLM wants
-RUN ln -sf /usr/local/cuda/lib64/libcudart.so.13.1.80 /usr/lib/libcudart.so.12 && \
-    ln -sf /usr/local/cuda/lib64/libcuda.so.1 /usr/lib/libcuda.so.1 && \
-    ldconfig
-# ----------------------------------
-
-# Final Truth Check: If this fails, the alias didn't work.
-RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM is initialized.')"
+# 4. Final Verification: This should now pass because libcudart.so.12 physically exists
+RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM initialized with CUDA 12 compatibility.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
