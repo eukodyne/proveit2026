@@ -43,7 +43,12 @@ services:
     ports:
       - "19530:19530"
       - "9091:9091"
-    command: ["milvus", "run", "standalone"]
+    command: ["milvus", "run", "standalone"] 
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"   # Max size of a single log file
+        max-file: "3"     # Keep only the last 3 files
 
   # 3. Your RAG API
   rag-api:
@@ -61,6 +66,11 @@ services:
     depends_on:
       - llm-server
       - milvus
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"   # Max size of a single log file
+        max-file: "3"     # Keep only the last 3 files
 
 volumes:
   milvus_data:
