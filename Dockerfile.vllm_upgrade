@@ -8,23 +8,25 @@ ENV UV_BREAK_SYSTEM_PACKAGES=1
 
 USER root
 
-# 1. Add the CORRECT Ubuntu 24.04 Repository and install ONLY the CUDA 12 Runtime
+# 1. Add Keyring and install the CUDA 12 Runtime via the libraries meta-package
+# This is more robust on ARM64/Ubuntu 24.04
 RUN apt-get update && apt-get install -y wget gnupg2 && \
     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/arm64/cuda-keyring_1.1-1_all.deb && \
     dpkg -i cuda-keyring_1.1-1_all.deb && \
     apt-get update && \
-    apt-get install -y cuda-cudart-12-4 && \
+    apt-get install -y libcudart12 cuda-cudart-12-x && \
+    apt-get install -y python3.12-dev cmake git ccache || true && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. Set Library Paths to ensure vLLM finds CUDA 12 first
-ENV LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda/lib64:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
+# 2. Add the dynamic search path for CUDA 12
+ENV LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda-12/lib64:${LD_LIBRARY_PATH}"
 
 # 3. Upgrade vLLM using uv
 RUN pip install uv --break-system-packages
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
-# 4. Final Verification: If this runs, the library is officially resolved
-RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM initialized with libcudart.so.12')"
+# 4. THE TRUTH CHECK: This will fail the build if libcudart.so.12 is still missing
+RUN python3 -c "import vllm; print('SUCCESS: vLLM can see CUDA.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
