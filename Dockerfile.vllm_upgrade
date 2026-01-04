@@ -1,0 +1,31 @@
+# Use your current working NVIDIA image as the base
+FROM nvcr.io/nvidia/vllm:25.12-py3
+
+# Set environment variables for Blackwell (SM120) compilation
+ENV TORCH_CUDA_ARCH_LIST="12.0"
+ENV VLLM_INSTALL_PUNICA_KERNELS=1
+ENV MAX_JOBS=8
+
+# Install build dependencies for aarch64
+USER root
+RUN apt-get update && apt-get install -y \
+    python3.12-dev \
+    cmake \
+    git \
+    ccache \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use 'uv' for significantly faster installation on ARM64
+RUN pip install uv
+
+# Force install vLLM 0.13.0
+# We use --no-deps initially to prevent it from downgrading NVIDIA's optimized PyTorch
+RUN uv pip install --no-cache-dir vllm==0.13.0 --no-deps
+
+# Install missing dependencies required by 0.13.x
+RUN uv pip install "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
+
+# Final sanity check: Verify SM120 kernels are present
+RUN python3 -c "import vllm; print(f'vLLM version: {vllm.__version__}')"
+
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
