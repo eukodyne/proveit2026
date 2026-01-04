@@ -1,6 +1,6 @@
 FROM nvcr.io/nvidia/vllm:25.12-py3
 
-# Blackwell Environment Setup
+# Blackwell/SM120 Environment
 ENV TORCH_CUDA_ARCH_LIST="12.0"
 ENV VLLM_INSTALL_PUNICA_KERNELS=1
 ENV MAX_JOBS=8
@@ -13,19 +13,23 @@ RUN apt-get update && apt-get install -y wget cmake git ccache && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Install uv and the CUDA 12 Runtime via Pip
-# This replaces the failing 'apt-get install cuda-cudart-12-4'
+# This package LITERALLY contains the libcudart.so.12 file we need
 RUN pip install uv --break-system-packages && \
     uv pip install --system --break-system-packages nvidia-cuda-runtime-cu12
 
-# 3. Force the system to find the newly installed libcudart.so.12
-# 'nvidia-cuda-runtime-cu12' installs into site-packages/nvidia/cuda_runtime/lib/
-ENV LD_LIBRARY_PATH="/usr/local/lib/python3.12/dist-packages/nvidia/cuda_runtime/lib:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+# 3. THE "LINKING" FIX
+# This finds the actual file in your site-packages and links it to /usr/lib
+RUN LIB_PATH=$(python3 -c "import nvidia.cuda_runtime as r; import os; print(os.path.join(os.path.dirname(r.__file__), 'lib', 'libcudart.so.12'))") && \
+    ln -sf $LIB_PATH /usr/lib/libcudart.so.12 && \
+    ldconfig
 
-# 4. Upgrade vLLM and specific SM120 dependencies
+# 4. Upgrade vLLM and SM120 specific dependencies
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
-# 5. FINAL TRUTH CHECK: This will fail the build if the library isn't found
-RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM successfully loaded libcudart.so.12')"
+# 5. THE "ARE YOU SURE?" CHECK
+# This will fail the build if the file is still missing
+RUN ls -l /usr/lib/libcudart.so.12 && \
+    python3 -c "import vllm; print('SUCCESS: vLLM is linked and ready for Blackwell.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
