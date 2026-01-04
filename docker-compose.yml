@@ -1,7 +1,7 @@
 services:
   # 1. The LLM Server (vLLM)
   llm-server:
-    image: nvcr.io/nvidia/vllm:25.09-py3
+    image: nvcr.io/nvidia/vllm:25.12-py3
     container_name: gpt-server
     runtime: nvidia
     restart: always
