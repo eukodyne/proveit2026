@@ -29,7 +29,6 @@ services:
         max-size: "10m"   # Max size of a single log file
         max-file: "3"     # Keep only the last 3 files
     command: >
-    # vllm serve openai/gpt-oss-20b
       vllm serve 2imi9/gpt-oss-20b-NVFP4
       --max-model-len 131072
       --gpu-memory-utilization 0.70
