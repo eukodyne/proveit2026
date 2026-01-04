@@ -16,14 +16,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Use 'uv' for significantly faster installation on ARM64
-RUN pip install uv
+RUN pip install uv --break-system-packages
 
 # Force install vLLM 0.13.0
 # We use --no-deps initially to prevent it from downgrading NVIDIA's optimized PyTorch
-RUN uv pip install --system --no-cache-dir vllm==0.13.0 --no-deps
+RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 
 # Install missing dependencies required by 0.13.x
-RUN uv pip install --system "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
+RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
 # Final sanity check: Verify SM120 kernels are present
 RUN python3 -c "import vllm; print(f'vLLM version: {vllm.__version__}')"
