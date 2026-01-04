@@ -33,7 +33,7 @@ services:
       --max-model-len 131072
       --gpu-memory-utilization 0.70
       --trust-remote-code
-      --quantization nvfp4
+      --quantization petit_nvfp4
 
   # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
