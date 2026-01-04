@@ -1,35 +1,16 @@
-# Use the official NVIDIA vLLM image as the base
 FROM nvcr.io/nvidia/vllm:25.12-py3
 
-# Set environment variables for Blackwell (SM120) compilation
-ENV TORCH_CUDA_ARCH_LIST="12.0"
-ENV VLLM_INSTALL_PUNICA_KERNELS=1
-ENV MAX_JOBS=12
-ENV UV_BREAK_SYSTEM_PACKAGES=1
-
 USER root
+# Install every possible build requirement for vLLM 0.13
+RUN apt-get update && apt-get install -y python3.12-dev cmake git ccache ninja-build && \
+    pip install uv --break-system-packages && \
+    uv pip install --system --break-system-packages "setuptools>=69.0" "setuptools_scm>=8.0" "wheel" "ninja"
 
-# 1. Install build dependencies and missing runtime libraries
-RUN apt-get update && apt-get install -y \
-    python3.12-dev \
-    cmake \
-    git \
-    ccache \
-    && rm -rf /var/lib/apt/lists/*
-
-# 2. Use 'uv' for fast dependency management
-RUN pip install uv --break-system-packages
-
-# 3. BUILD VLLM FROM SOURCE (The symbol fix)
-# We clone vLLM and install it in-place. This forces a compilation 
-# against NVIDIA's local PyTorch, fixing the 'undefined symbol' error.
+# Single-step clone and install
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
     uv pip install --system --break-system-packages \
     "ijson" "partial-json-parser" "py-cpuinfo" "xgrammar" "flashinfer-python" && \
-    uv pip install --system --break-system-packages -e . --no-build-isolation
-
-# 4. Final verification: This MUST pass during the build
-RUN python3 -c "import vllm; print(f'SUCCESS: vLLM {vllm.__version__} built for Blackwell.')"
+    VLLM_TARGET_DEVICE=cuda python3 setup.py install
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
