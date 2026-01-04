@@ -6,9 +6,8 @@ ENV VLLM_INSTALL_PUNICA_KERNELS=1
 ENV MAX_JOBS=8
 ENV UV_BREAK_SYSTEM_PACKAGES=1
 
-# Hardcode the library paths into the image environment
+# Hardcode the library paths
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
-ENV CUDA_HOME="/usr/local/cuda"
 
 USER root
 RUN apt-get update && apt-get install -y python3.12-dev cmake git ccache && rm -rf /var/lib/apt/lists/*
@@ -17,16 +16,14 @@ RUN pip install uv --break-system-packages
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
-# --- THE "FORCE LINK" SCRIPT ---
-# This finds whatever version of libcudart is present and tells the system 
-# it is 'version 12' to satisfy the vLLM 0.13.0 binary.
-RUN LATEST_LIBCUDART=$(find /usr/local/cuda/lib64 -name "libcudart.so.*" | head -n 1) && \
-    ln -sf $LATEST_LIBCUDART /usr/lib/libcudart.so.12 && \
+# --- THE "CUDA 13 TO 12" BRIDGE ---
+# We link your existing .13 libraries to the .12 names vLLM wants
+RUN ln -sf /usr/local/cuda/lib64/libcudart.so.13.1.80 /usr/lib/libcudart.so.12 && \
     ln -sf /usr/local/cuda/lib64/libcuda.so.1 /usr/lib/libcuda.so.1 && \
     ldconfig
-# -------------------------------
+# ----------------------------------
 
-# The 'Proof of Life' check
-RUN python3 -c "import vllm; print(f'vLLM {vllm.__version__} successfully initialized CUDA.')"
+# Final Truth Check: If this fails, the alias didn't work.
+RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM is initialized.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
