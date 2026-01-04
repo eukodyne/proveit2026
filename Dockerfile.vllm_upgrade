@@ -1,37 +1,35 @@
+# Use the official NVIDIA vLLM image as the base
 FROM nvcr.io/nvidia/vllm:25.12-py3
 
-# Blackwell/SM120 Environment
+# Set environment variables for Blackwell (SM120) compilation
 ENV TORCH_CUDA_ARCH_LIST="12.0"
 ENV VLLM_INSTALL_PUNICA_KERNELS=1
-ENV MAX_JOBS=8
+ENV MAX_JOBS=12
 ENV UV_BREAK_SYSTEM_PACKAGES=1
 
 USER root
 
-# 1. Install build tools
-RUN apt-get update && apt-get install -y wget cmake git ccache && \
-    rm -rf /var/lib/apt/lists/*
+# 1. Install build dependencies and missing runtime libraries
+RUN apt-get update && apt-get install -y \
+    python3.12-dev \
+    cmake \
+    git \
+    ccache \
+    && rm -rf /var/lib/apt/lists/*
 
-# 2. Install uv and the CUDA 12 Runtime via Pip
-RUN pip install uv --break-system-packages && \
-    uv pip install --system --break-system-packages nvidia-cuda-runtime-cu12
+# 2. Use 'uv' for fast dependency management
+RUN pip install uv --break-system-packages
 
-# 3. THE "FORCE DEPLOY" FIX
-RUN LIB_FILE=$(find /usr/local/lib/python3.12/dist-packages/nvidia/cuda_runtime/lib/ -name "libcudart.so.12*" | head -n 1) && \
-    cp "$LIB_FILE" /usr/lib/libcudart.so.12 && \
-    ldconfig
+# 3. BUILD VLLM FROM SOURCE (The symbol fix)
+# We clone vLLM and install it in-place. This forces a compilation 
+# against NVIDIA's local PyTorch, fixing the 'undefined symbol' error.
+RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
+    cd /opt/vllm_src && \
+    uv pip install --system --break-system-packages \
+    "ijson" "partial-json-parser" "py-cpuinfo" "xgrammar" "flashinfer-python" && \
+    uv pip install --system --break-system-packages -e . --no-build-isolation
 
-# 4. Upgrade vLLM and ALL missing dependencies for 0.13.x
-RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
-RUN uv pip install --system --break-system-packages \
-    "fastsafetensors>=0.1.0" \
-    "flashinfer-python" \
-    "xgrammar" \
-    "ijson" \
-    "partial-json-parser" \
-    "py-cpuinfo"
-
-# 5. FINAL TRUTH CHECK
-RUN python3 -c "import vllm; print('SUCCESS: vLLM 0.13.0 is ready.')"
+# 4. Final verification: This MUST pass during the build
+RUN python3 -c "import vllm; print(f'SUCCESS: vLLM {vllm.__version__} built for Blackwell.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
