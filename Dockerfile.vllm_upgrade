@@ -8,22 +8,24 @@ ENV UV_BREAK_SYSTEM_PACKAGES=1
 
 USER root
 
-# 1. Direct Download of the CUDA 12.4 runtime library (ARM64)
-# We pull just the runtime package and extract the missing libcudart.so.12
-RUN apt-get update && apt-get install -y wget binutils && \
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/arm64/cuda-cudart-12-4_12.4.127-1_arm64.deb && \
-    ar x cuda-cudart-12-4_12.4.127-1_arm64.deb && \
-    tar -xvf data.tar.zst && \
-    cp usr/local/cuda-12.4/lib64/libcudart.so.12* /usr/local/lib/ && \
-    rm -rf cuda-cudart-12-4* data.tar.zst control.tar.gz debian-binary usr && \
-    ldconfig /usr/local/lib
+# 1. Add the Ubuntu 24.04 ARM64-SBSA Repository
+# This is the correct path for Grace-Blackwell (GB10) hardware
+RUN apt-get update && apt-get install -y wget gnupg2 && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && \
+    apt-get install -y cuda-cudart-12-4 && \
+    rm -rf /var/lib/apt/lists/*
 
-# 2. Re-install vLLM 0.13.0 dependencies
+# 2. Add the dynamic search path for CUDA 12.4
+ENV LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda/lib64:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
+
+# 3. Upgrade vLLM using uv
 RUN pip install uv --break-system-packages
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
-# 3. VERIFICATION: This MUST pass during the build process
-RUN python3 -c "import vllm; print('SUCCESS: vLLM successfully imported and linked to libcudart.so.12')"
+# 4. Final Verification: If this runs, the library is officially linked
+RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM initialized with libcudart.so.12')"
 
-ENTRYPOINT ["python3", "-m vllm.entrypoints.openai.api_server"]
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
