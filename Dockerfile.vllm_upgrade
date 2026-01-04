@@ -16,19 +16,22 @@ RUN apt-get update && apt-get install -y wget cmake git ccache && \
 RUN pip install uv --break-system-packages && \
     uv pip install --system --break-system-packages nvidia-cuda-runtime-cu12
 
-# --- THE "FORCE DEPLOY" FIX ---
-# We find the physical file in the site-packages and move it to /usr/lib
+# 3. THE "FORCE DEPLOY" FIX
 RUN LIB_FILE=$(find /usr/local/lib/python3.12/dist-packages/nvidia/cuda_runtime/lib/ -name "libcudart.so.12*" | head -n 1) && \
-    if [ -z "$LIB_FILE" ]; then echo "Error: libcudart.so.12 not found"; exit 1; fi && \
     cp "$LIB_FILE" /usr/lib/libcudart.so.12 && \
     ldconfig
-# -------------------------------
 
-# 3. Upgrade vLLM and SM120 specific dependencies
+# 4. Upgrade vLLM and ALL missing dependencies for 0.13.x
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
-RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
+RUN uv pip install --system --break-system-packages \
+    "fastsafetensors>=0.1.0" \
+    "flashinfer-python" \
+    "xgrammar" \
+    "ijson" \
+    "partial-json-parser" \
+    "py-cpuinfo"
 
-# 4. FINAL TRUTH CHECK: If this step passes, the server WILL run.
-RUN python3 -c "import vllm; print('SUCCESS: vLLM is linked and ready for Blackwell.')"
+# 5. FINAL TRUTH CHECK
+RUN python3 -c "import vllm; print('SUCCESS: vLLM 0.13.0 is ready.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
