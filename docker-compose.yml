@@ -5,8 +5,13 @@ services:
     container_name: gpt-server
     runtime: nvidia
     restart: always
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+      - TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
     volumes:
       - /home/devmaster/.cache/huggingface:/root/.cache/huggingface
       - /home/devmaster/tiktoken_cache:/app/tiktoken_cache
@@ -17,7 +22,6 @@ services:
       --max-model-len 131072
       --gpu-memory-utilization 0.70
       --trust-remote-code
-      --enforce-eager
 
   # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
