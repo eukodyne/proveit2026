@@ -13,7 +13,8 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
       - VLLM_USE_V1=1
-      - VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1
+      - VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=0
+      - VLLM_USE_FLASHINFER_MOE_NVFP4=1
       - VLLM_USE_TRTLLM_ATTENTION=1
       - TORCH_CUDA_ARCH_LIST="12.0"
       - PYTHONWARNINGS=ignore::UserWarning:torchvision.io.image
