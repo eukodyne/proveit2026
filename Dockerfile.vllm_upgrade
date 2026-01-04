@@ -8,9 +8,11 @@ ENV UV_BREAK_SYSTEM_PACKAGES=1
 
 USER root
 
-# 1. Install CUDA 12 Runtime libraries (vLLM's dependency)
-# This provides the actual libcudart.so.12 without overwriting your CUDA 13.1
-RUN apt-get update && apt-get install -y \
+# 1. Add NVIDIA CUDA 12 Repository and install the runtime
+RUN apt-get update && apt-get install -y wget gnupg2 && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/arm64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    apt-get update && apt-get install -y \
     cuda-cudart-12-4 \
     python3.12-dev \
     cmake \
@@ -18,15 +20,15 @@ RUN apt-get update && apt-get install -y \
     ccache \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Set Library Paths to see BOTH CUDA 13 and CUDA 12
+# 2. Set Library Paths to see CUDA 12 (for vLLM) and CUDA 13 (for Drivers)
 ENV LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda/lib64:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
 
-# 3. Upgrade vLLM
+# 3. Upgrade vLLM using uv
 RUN pip install uv --break-system-packages
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
-# 4. Final Verification: This should now pass because libcudart.so.12 physically exists
-RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM initialized with CUDA 12 compatibility.')"
+# 4. Final Verification
+RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM initialized.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
