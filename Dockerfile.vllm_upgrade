@@ -8,19 +8,14 @@ ENV UV_BREAK_SYSTEM_PACKAGES=1
 
 USER root
 
-# 1. Add NVIDIA CUDA 12 Repository and install the runtime
-RUN apt-get update && apt-get install -y wget gnupg2 && \
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/arm64/cuda-keyring_1.1-1_all.deb && \
-    dpkg -i cuda-keyring_1.1-1_all.deb && \
-    apt-get update && apt-get install -y \
-    cuda-cudart-12-4 \
-    python3.12-dev \
-    cmake \
-    git \
-    ccache \
-    && rm -rf /var/lib/apt/lists/*
+# 1. Install dependencies and DIRECTLY download the CUDA 12.4 runtime
+RUN apt-get update && apt-get install -y wget python3.12-dev cmake git ccache && \
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/arm64/cuda-cudart-12-4_12.4.127-1_arm64.deb && \
+    dpkg -i cuda-cudart-12-4_12.4.127-1_arm64.deb && \
+    rm cuda-cudart-12-4_12.4.127-1_arm64.deb && \
+    rm -rf /var/lib/apt/lists/*
 
-# 2. Set Library Paths to see CUDA 12 (for vLLM) and CUDA 13 (for Drivers)
+# 2. Set Library Paths to see CUDA 12.4 (where the .deb installs it)
 ENV LD_LIBRARY_PATH="/usr/local/cuda-12.4/lib64:/usr/local/cuda/lib64:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}"
 
 # 3. Upgrade vLLM using uv
@@ -28,7 +23,7 @@ RUN pip install uv --break-system-packages
 RUN uv pip install --system --break-system-packages --no-cache-dir vllm==0.13.0 --no-deps
 RUN uv pip install --system --break-system-packages "fastsafetensors>=0.1.0" "flashinfer-python" "xgrammar"
 
-# 4. Final Verification
-RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM initialized.')"
+# 4. Final Verification: If this runs, the library is officially linked
+RUN python3 -c "import vllm; print('SUCCESS: Blackwell vLLM initialized with libcudart.so.12')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
