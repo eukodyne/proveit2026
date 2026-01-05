@@ -14,13 +14,13 @@ RUN apt-get update && apt-get install -y \
     cmake git ccache ninja-build wget gnupg2 \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Setup Python environment (Using the fix for PEP 668)
+# 3. Setup Python environment 
+# Using --ignore-installed avoids the 'RECORD file not found' error
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.12 /usr/bin/python && \
-    # We add --break-system-packages to allow pip to work in this container
-    python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
+    python3 -m pip install --upgrade pip setuptools wheel --break-system-packages --ignore-installed
 
-# 4. Install Torch (CUDA 12.4+ builds support Blackwell SM120)
+# 4. Install Torch (Supporting Blackwell SM120)
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --break-system-packages
 
 # 5. Build vLLM 0.13.0 from Source
@@ -30,7 +30,7 @@ RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.gi
     pip install "flashinfer-python" "fastsafetensors>=0.1.1" --break-system-packages && \
     python3 setup.py install
 
-# 6. VERSION GUARD: The build will fail here if it's not 0.13.0
+# 6. VERSION GUARD
 RUN ACTUAL_VERSION=$(python3 -c "import vllm; print(vllm.__version__)") && \
     echo "Detected Version: $ACTUAL_VERSION" && \
     if [ "$ACTUAL_VERSION" != "0.13.0" ]; then echo "VERSION MISMATCH! Got $ACTUAL_VERSION"; exit 1; fi
