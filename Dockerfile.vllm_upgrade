@@ -2,6 +2,7 @@
 FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
 
 # --- BLACKWELL & BUILD SETTINGS ---
+# SM 12.0 is specifically for Blackwell (GB10 / GB200)
 ENV TORCH_CUDA_ARCH_LIST="12.0"
 ENV MAX_JOBS=12
 ENV DEBIAN_FRONTEND=noninteractive
@@ -15,20 +16,21 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 3. Setup Python environment 
-# Using --ignore-installed avoids the 'RECORD file not found' error
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.12 /usr/bin/python && \
     python3 -m pip install --upgrade pip setuptools wheel --break-system-packages --ignore-installed
 
-# 4. Install Torch (Supporting Blackwell SM120)
+# 4. Install Torch (CUDA 12.4+ builds support Blackwell)
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --break-system-packages
 
 # 5. Build vLLM 0.13.0 from Source
+# We clone the repo and use 'pip install .' to handle all dependencies automatically
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
-    pip install -r requirements.txt --break-system-packages && \
+    # Install additional high-perf dependencies for Blackwell
     pip install "flashinfer-python" "fastsafetensors>=0.1.1" --break-system-packages && \
-    python3 setup.py install
+    # Build and install vLLM 0.13.0
+    pip install . --break-system-packages
 
 # 6. VERSION GUARD
 RUN ACTUAL_VERSION=$(python3 -c "import vllm; print(vllm.__version__)") && \
