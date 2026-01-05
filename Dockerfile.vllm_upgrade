@@ -1,4 +1,4 @@
-# 1. Use a raw CUDA Development image (Ubuntu 24.04 ARM64)
+# 1. Use the official NVIDIA CUDA Dev image (Ubuntu 24.04 ARM64)
 FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
 
 # --- BLACKWELL & BUILD SETTINGS ---
@@ -14,24 +14,23 @@ RUN apt-get update && apt-get install -y \
     cmake git ccache ninja-build wget gnupg2 \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Setup Python environment
+# 3. Setup Python environment (Using the fix for PEP 668)
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.12 /usr/bin/python && \
-    python3 -m pip install --upgrade pip setuptools wheel
+    # We add --break-system-packages to allow pip to work in this container
+    python3 -m pip install --upgrade pip setuptools wheel --break-system-packages
 
-# 4. Install Torch (Must be a version that supports Blackwell/CUDA 12.6+)
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# 4. Install Torch (CUDA 12.4+ builds support Blackwell SM120)
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --break-system-packages
 
 # 5. Build vLLM 0.13.0 from Source
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
-    # Install dependencies
-    pip install -r requirements.txt && \
-    pip install "flashinfer-python" "fastsafetensors>=0.1.1" && \
-    # The actual build
+    pip install -r requirements.txt --break-system-packages && \
+    pip install "flashinfer-python" "fastsafetensors>=0.1.1" --break-system-packages && \
     python3 setup.py install
 
-# 6. CRITICAL VERIFICATION: This will fail the build if the version is wrong
+# 6. VERSION GUARD: The build will fail here if it's not 0.13.0
 RUN ACTUAL_VERSION=$(python3 -c "import vllm; print(vllm.__version__)") && \
     echo "Detected Version: $ACTUAL_VERSION" && \
     if [ "$ACTUAL_VERSION" != "0.13.0" ]; then echo "VERSION MISMATCH! Got $ACTUAL_VERSION"; exit 1; fi
