@@ -1,45 +1,39 @@
-# Use the official NVIDIA vLLM base
-FROM nvcr.io/nvidia/vllm:25.12-py3
+# 1. Use a raw CUDA Development image (Ubuntu 24.04 ARM64)
+FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
 
-# --- BLACKWELL ENV VARS ---
+# --- BLACKWELL & BUILD SETTINGS ---
 ENV TORCH_CUDA_ARCH_LIST="12.0"
-ENV VLLM_INSTALL_PUNICA_KERNELS=1
 ENV MAX_JOBS=12
-ENV UV_BREAK_SYSTEM_PACKAGES=1
-# Force vLLM to use the new CUDA 13.1 paths
-ENV CUDA_HOME=/usr/local/cuda-13.1
-ENV PATH="${CUDA_HOME}/bin:${PATH}"
-ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
+ENV DEBIAN_FRONTEND=noninteractive
 
 USER root
 
-# 1. Update Repo & Install CUDA Toolkit 13.1
-RUN apt-get update && apt-get install -y wget gnupg2 && \
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb && \
-    dpkg -i cuda-keyring_1.1-1_all.deb && \
-    apt-get update && apt-get install -y \
-    cuda-toolkit-13-1 \
-    python3.12-dev cmake git ccache ninja-build && \
-    rm -rf /var/lib/apt/lists/*
+# 2. Install Python 3.12 and build essentials
+RUN apt-get update && apt-get install -y \
+    python3.12 python3.12-dev python3-pip \
+    cmake git ccache ninja-build wget gnupg2 \
+    && rm -rf /var/lib/apt/lists/*
 
-# 2. DEEP CLEAN: Remove pre-installed vLLM and its entrypoints
-RUN pip uninstall -y vllm && \
-    rm -rf /usr/local/lib/python3.12/dist-packages/vllm* && \
-    rm -f /usr/local/bin/vllm
+# 3. Setup Python environment
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python && \
+    python3 -m pip install --upgrade pip setuptools wheel
 
-# 3. Setup Build Tools
-RUN pip install uv --break-system-packages && \
-    uv pip install --system --break-system-packages "setuptools>=69.0" "setuptools_scm>=8.0" "wheel" "ninja"
+# 4. Install Torch (Must be a version that supports Blackwell/CUDA 12.6+)
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# 4. Build vLLM 0.13.0 from Source
+# 5. Build vLLM 0.13.0 from Source
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
-    uv pip install --system --break-system-packages \
-    "ijson" "partial-json-parser" "py-cpuinfo" "xgrammar" "flashinfer-python" "fastsafetensors>=0.1.1" && \
-    # Explicitly use python3 to install to ensure it hits the system path
+    # Install dependencies
+    pip install -r requirements.txt && \
+    pip install "flashinfer-python" "fastsafetensors>=0.1.1" && \
+    # The actual build
     python3 setup.py install
 
-# 5. Verification (Build-time check)
-RUN python3 -c "import vllm; print(f'VERIFIED: vLLM version is {vllm.__version__}')"
+# 6. CRITICAL VERIFICATION: This will fail the build if the version is wrong
+RUN ACTUAL_VERSION=$(python3 -c "import vllm; print(vllm.__version__)") && \
+    echo "Detected Version: $ACTUAL_VERSION" && \
+    if [ "$ACTUAL_VERSION" != "0.13.0" ]; then echo "VERSION MISMATCH! Got $ACTUAL_VERSION"; exit 1; fi
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
