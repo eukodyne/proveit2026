@@ -18,12 +18,7 @@ RUN apt-get update && apt-get install -y wget gnupg2 && \
 
 # 2. Install CUDA 13.1 Dev Headers (Fixes 'cusparse.h' missing)
 RUN apt-get update && apt-get install -y \
-    cuda-cusparse-dev-13-1 \
-    cuda-cublas-dev-13-1 \
-    cuda-cufft-dev-13-1 \
-    cuda-curand-dev-13-1 \
-    cuda-nvrtc-dev-13-1 \
-    cuda-nvml-dev-13-1 \
+    cuda-toolkit-13-1 \
     python3.12-dev cmake git ccache ninja-build && \
     rm -rf /var/lib/apt/lists/*
 
