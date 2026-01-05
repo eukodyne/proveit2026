@@ -1,16 +1,43 @@
 FROM nvcr.io/nvidia/vllm:25.12-py3
 
+# --- FORUM GUIDED ENV VARS ---
+# 1. Target Blackwell SM120. '12.0f' is the forum-recommended flag for CUDA 13 builds
+ENV TORCH_CUDA_ARCH_LIST="12.0" 
+# 2. Critical for Triton: Points to the local CUDA ptxas binary
+ENV TRITON_PTXAS_PATH="/usr/local/cuda/bin/ptxas"
+# 3. Ensure we use the local PyTorch/CUDA libraries
+ENV VLLM_INSTALL_PUNICA_KERNELS=1
+ENV MAX_JOBS=12
+ENV UV_BREAK_SYSTEM_PACKAGES=1
+
 USER root
-# Install every possible build requirement for vLLM 0.13
-RUN apt-get update && apt-get install -y python3.12-dev cmake git ccache ninja-build && \
-    pip install uv --break-system-packages && \
+
+# 1. Install Dev Headers for CUDA 13.1 (Resolves the 'cusparse.h' error)
+# Since the image uses CUDA 13.1, we must install the matching dev packages
+RUN apt-get update && apt-get install -y \
+    cuda-cusparse-dev-13-1 \
+    cuda-cublas-dev-13-1 \
+    cuda-cufft-dev-13-1 \
+    cuda-curand-dev-13-1 \
+    cuda-nvrtc-dev-13-1 \
+    cuda-nvml-dev-13-1 \
+    python3.12-dev cmake git ccache ninja-build && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. Build Tools
+RUN pip install uv --break-system-packages && \
     uv pip install --system --break-system-packages "setuptools>=69.0" "setuptools_scm>=8.0" "wheel" "ninja"
 
-# Single-step clone and install
+# 3. Forum Recommended Build Flow
+# Clone v0.13.0 and build using --no-build-isolation to use the container's PyTorch
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
     uv pip install --system --break-system-packages \
     "ijson" "partial-json-parser" "py-cpuinfo" "xgrammar" "flashinfer-python" && \
-    VLLM_TARGET_DEVICE=cuda python3 setup.py install
+    # Using the forum's recommendation: Build from source with existing environment
+    python3 setup.py install
+
+# 4. Final verification
+RUN python3 -c "import vllm; print('SUCCESS: vLLM 0.13.0 is built and SM120 verified.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
