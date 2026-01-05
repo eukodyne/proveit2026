@@ -1,14 +1,19 @@
+# Use the official NVIDIA vLLM base
 FROM nvcr.io/nvidia/vllm:25.12-py3
 
+# --- BLACKWELL ENV VARS ---
 ENV TORCH_CUDA_ARCH_LIST="12.0"
-ENV TRITON_PTXAS_PATH="/usr/local/cuda/bin/ptxas"
 ENV VLLM_INSTALL_PUNICA_KERNELS=1
 ENV MAX_JOBS=12
 ENV UV_BREAK_SYSTEM_PACKAGES=1
+# Force vLLM to use the new CUDA 13.1 paths
+ENV CUDA_HOME=/usr/local/cuda-13.1
+ENV PATH="${CUDA_HOME}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
 
 USER root
 
-# 1. Update Repo & Install CUDA Toolkit
+# 1. Update Repo & Install CUDA Toolkit 13.1
 RUN apt-get update && apt-get install -y wget gnupg2 && \
     wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb && \
     dpkg -i cuda-keyring_1.1-1_all.deb && \
@@ -17,21 +22,24 @@ RUN apt-get update && apt-get install -y wget gnupg2 && \
     python3.12-dev cmake git ccache ninja-build && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. CLEAR EXISTING vLLM
-RUN pip uninstall -y vllm
+# 2. DEEP CLEAN: Remove pre-installed vLLM and its entrypoints
+RUN pip uninstall -y vllm && \
+    rm -rf /usr/local/lib/python3.12/dist-packages/vllm* && \
+    rm -f /usr/local/bin/vllm
 
 # 3. Setup Build Tools
 RUN pip install uv --break-system-packages && \
     uv pip install --system --break-system-packages "setuptools>=69.0" "setuptools_scm>=8.0" "wheel" "ninja"
 
-# 4. Build vLLM 0.13.0
+# 4. Build vLLM 0.13.0 from Source
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
     uv pip install --system --break-system-packages \
     "ijson" "partial-json-parser" "py-cpuinfo" "xgrammar" "flashinfer-python" "fastsafetensors>=0.1.1" && \
+    # Explicitly use python3 to install to ensure it hits the system path
     python3 setup.py install
 
-# 5. Force binary link (Ensures 'vllm' command uses the new build)
-RUN ln -sf /usr/local/bin/vllm /usr/bin/vllm
+# 5. Verification (Build-time check)
+RUN python3 -c "import vllm; print(f'VERIFIED: vLLM version is {vllm.__version__}')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
