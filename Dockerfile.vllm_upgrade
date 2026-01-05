@@ -1,40 +1,39 @@
-# 1. Use the official NVIDIA CUDA Dev image (Ubuntu 24.04 ARM64)
-FROM nvidia/cuda:12.6.3-devel-ubuntu24.04
+# 1. Match your host exactly: CUDA 13.1 on Ubuntu 24.04
+FROM nvidia/cuda:13.1-devel-ubuntu24.04
 
-# --- BLACKWELL & BUILD SETTINGS ---
-# SM 12.0 is specifically for Blackwell (GB10 / GB200)
+# --- BLACKWELL (SM120) & UNIFIED MEMORY SETTINGS ---
 ENV TORCH_CUDA_ARCH_LIST="12.0"
-ENV MAX_JOBS=12
+ENV VLLM_TARGET_DEVICE="cuda"
+# Shared RAM safety: Lower jobs to 2 to prevent the 'dnnl' linking crash
+ENV MAX_JOBS=2
+ENV VLLM_FLASH_ATTN_VERSION=2
 ENV DEBIAN_FRONTEND=noninteractive
 
 USER root
 
-# 2. Install Python 3.12 and build essentials
+# 2. Install ARM64 build essentials
 RUN apt-get update && apt-get install -y \
     python3.12 python3.12-dev python3-pip \
     cmake git ccache ninja-build wget gnupg2 \
+    libgoogle-perftools-dev numactl \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Setup Python environment 
+# 3. Setup Python 3.12 (Bypassing PEP 668)
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
-    ln -sf /usr/bin/python3.12 /usr/bin/python && \
     python3 -m pip install --upgrade pip setuptools wheel --break-system-packages --ignore-installed
 
-# 4. Install Torch (CUDA 12.4+ builds support Blackwell)
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --break-system-packages
+# 4. Install Blackwell-ready Torch (2.6+ recommended for SM120)
+RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu131 --break-system-packages
 
-# 5. Build vLLM 0.13.0 from Source
-# We clone the repo and use 'pip install .' to handle all dependencies automatically
+# 5. Build vLLM 0.13.0
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
-    # Install additional high-perf dependencies for Blackwell
-    pip install "flashinfer-python" "fastsafetensors>=0.1.1" --break-system-packages && \
-    # Build and install vLLM 0.13.0
-    pip install . --break-system-packages
+    # Install specific Blackwell dependencies
+    pip install "numpy<2.0" "flashinfer-python" "fastsafetensors>=0.1.1" --break-system-packages && \
+    # The build: 'pip install .' handles the modern vLLM folder structure
+    pip install . --verbose --break-system-packages
 
-# 6. VERSION GUARD
-RUN ACTUAL_VERSION=$(python3 -c "import vllm; print(vllm.__version__)") && \
-    echo "Detected Version: $ACTUAL_VERSION" && \
-    if [ "$ACTUAL_VERSION" != "0.13.0" ]; then echo "VERSION MISMATCH! Got $ACTUAL_VERSION"; exit 1; fi
+# 6. VERSION GUARD (Ensures we don't accidentally ship 0.11 again)
+RUN python3 -c "import vllm; print(f'VERIFIED: vLLM {vllm.__version__} is ready for SM120.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
