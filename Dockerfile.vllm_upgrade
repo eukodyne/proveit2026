@@ -1,12 +1,10 @@
-# 1. Match your host exactly: CUDA 13.1 on Ubuntu 24.04
+# 1. Use the stable Blackwell-compatible production image
 FROM nvidia/cuda:12.8.0-devel-ubuntu24.04
 
 # --- BLACKWELL (SM120) & UNIFIED MEMORY SETTINGS ---
 ENV TORCH_CUDA_ARCH_LIST="12.0"
 ENV VLLM_TARGET_DEVICE="cuda"
-# Shared RAM safety: Lower jobs to 2 to prevent the 'dnnl' linking crash
 ENV MAX_JOBS=2
-ENV VLLM_FLASH_ATTN_VERSION=2
 ENV DEBIAN_FRONTEND=noninteractive
 
 USER root
@@ -18,22 +16,21 @@ RUN apt-get update && apt-get install -y \
     libgoogle-perftools-dev numactl \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Setup Python 3.12 (Bypassing PEP 668)
+# 3. Setup Python 3.12
 RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     python3 -m pip install --upgrade pip setuptools wheel --break-system-packages --ignore-installed
 
-# 4. Install Blackwell-ready Torch (2.6+ recommended for SM120)
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu131 --break-system-packages
+# 4. Install Torch using the index that supports ARM64 + CUDA
+# We remove the cu131 specific URL which is often x86_64 only
+RUN pip install torch torchvision torchaudio --break-system-packages
 
 # 5. Build vLLM 0.13.0
 RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
     cd /opt/vllm_src && \
-    # Install specific Blackwell dependencies
     pip install "numpy<2.0" "flashinfer-python" "fastsafetensors>=0.1.1" --break-system-packages && \
-    # The build: 'pip install .' handles the modern vLLM folder structure
     pip install . --verbose --break-system-packages
 
-# 6. VERSION GUARD (Ensures we don't accidentally ship 0.11 again)
-RUN python3 -c "import vllm; print(f'VERIFIED: vLLM {vllm.__version__} is ready for SM120.')"
+# 6. VERSION GUARD
+RUN python3 -c "import vllm; print(f'VERIFIED: vLLM {vllm.__version__} is ready.')"
 
 ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
