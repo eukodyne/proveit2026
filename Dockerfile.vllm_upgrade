@@ -1,43 +1,47 @@
-# 1. Use the stable Blackwell-compatible production image
-FROM nvidia/cuda:12.8.0-devel-ubuntu24.04
+# vLLM 0.13 for NVIDIA Spark / Dell Pro Max GB10 (ARM64 + Blackwell SM120)
+# Based on eugr/spark-vllm-docker approach
 
-# --- BLACKWELL (SM120) & BUILD STABILITY SETTINGS ---
-ENV TORCH_CUDA_ARCH_LIST="12.0"
-ENV VLLM_TARGET_DEVICE="cuda"
-# Force the version to bypass the 'Unknown runtime environment' error
-ENV VLLM_VERSION_OVERRIDE="0.13.0"
-ENV SETUPTOOLS_SCM_PRETEND_VERSION="0.13.0"
-# Shared RAM safety: Lower jobs to 2 to prevent the 'dnnl' linking crash
-ENV MAX_JOBS=2
+FROM nvidia/cuda:13.1.0-devel-ubuntu24.04
+
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
-USER root
+# Build parallelism settings (prevent OOM)
+ARG BUILD_JOBS=8
+ENV MAX_JOBS=${BUILD_JOBS}
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
 
-# 2. Install ARM64 build essentials
-RUN apt-get update && apt-get install -y \
-    python3.12 python3.12-dev python3-pip \
-    cmake git ccache ninja-build wget gnupg2 \
-    libgoogle-perftools-dev numactl \
-    && rm -rf /var/lib/apt/lists/*
+# PyTorch/CUDA settings for Blackwell SM120
+ENV TORCH_CUDA_ARCH_LIST=12.1a
+ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 
-# 3. Setup Python 3.12
-RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
-    python3 -m pip install --upgrade pip setuptools wheel setuptools-scm --break-system-packages --ignore-installed
+# uv package manager settings
+ENV UV_SYSTEM_PYTHON=1
+ENV UV_BREAK_SYSTEM_PACKAGES=1
 
-# 4. Install Blackwell-ready Torch and NumPy
-# Pre-installing NumPy fixes the Torch 'Failed to initialize NumPy' warning
-RUN pip install "numpy<2.0" torch torchvision torchaudio --break-system-packages
+# Install runtime dependencies including CUDA libs
+RUN apt update && apt upgrade -y \
+    && apt install -y --allow-change-held-packages --no-install-recommends \
+        python3 python3-pip python3-dev \
+        git wget curl jq \
+        libcudnn9-cuda-13 \
+        libnccl-dev libnccl2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install uv
 
-# 5. Build vLLM 0.13.0
-# Note: We still use --depth 1 for speed, but the ENV variables above fix the error it caused
-RUN git clone --depth 1 --branch v0.13.0 https://github.com/vllm-project/vllm.git /opt/vllm_src && \
-    cd /opt/vllm_src && \
-    # Install specific Blackwell dependencies
-    pip install "flashinfer-python" "fastsafetensors>=0.1.1" --break-system-packages && \
-    # The build: We use --no-build-isolation to use the packages we just installed
-    pip install . --verbose --break-system-packages --no-build-isolation
+# Install vLLM nightly with auto PyTorch backend (handles CUDA deps automatically)
+# Using nightly for CUDA 13 compatibility
+RUN uv pip install -U vllm \
+    --torch-backend=auto \
+    --extra-index-url https://wheels.vllm.ai/nightly/cu130
 
-# 6. VERSION GUARD
-RUN python3 -c "import vllm; print(f'VERIFIED: vLLM {vllm.__version__} is ready for SM120.')"
+# Install FlashInfer for attention optimization
+RUN uv pip install flashinfer-python -U --no-deps --index-url https://flashinfer.ai/whl && \
+    uv pip install flashinfer-cubin --index-url https://flashinfer.ai/whl && \
+    uv pip install flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130
 
-ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+# Version verification
+RUN python3 -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.version.cuda}')" && \
+    python3 -c "import vllm; print(f'vLLM {vllm.__version__}')"
+
+ENTRYPOINT ["vllm"]

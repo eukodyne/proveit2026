@@ -1,5 +1,5 @@
 services:
-  # 1. The LLM Server (vLLM) - original image: nvcr.io/nvidia/vllm:25.12-py3 - custom image: vllm-blackwell-native:0.13.0
+  # 1. The LLM Server (vLLM) - NVIDIA Qwen3-32B-NVFP4 on official container
   llm-server:
     image: nvcr.io/nvidia/vllm:25.12-py3
     container_name: gpt-server
@@ -11,17 +11,11 @@ services:
       stack: 67108864
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - TIKTOKEN_CACHE_DIR=/app/tiktoken_cache
       - VLLM_USE_V1=1
-      - VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=0
-      - VLLM_USE_FLASHINFER_MOE_NVFP4=1
-      - VLLM_USE_TRTLLM_ATTENTION=1
       - TORCH_CUDA_ARCH_LIST="12.0"
       - PYTHONWARNINGS=ignore::UserWarning:torchvision.io.image
-      - LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$LD_LIBRARY_PATH
     volumes:
       - /home/devmaster/.cache/huggingface:/root/.cache/huggingface
-      - /home/devmaster/tiktoken_cache:/app/tiktoken_cache
     ports:
       - "8000:8000"
     logging:
@@ -29,12 +23,14 @@ services:
       options:
         max-size: "10m"   # Max size of a single log file
         max-file: "3"     # Keep only the last 3 files
-    command: >
-      vllm serve 2imi9/gpt-oss-20b-NVFP4
-      --max-model-len 131072
-      --gpu-memory-utilization 0.70
-      --trust-remote-code
-      --quantization nvfp4
+    entrypoint: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+    command:
+      - --model=nvidia/Qwen3-32B-NVFP4
+      - --max-model-len=32768
+      - --gpu-memory-utilization=0.40
+      - --trust-remote-code
+      - --host=0.0.0.0
+      - --port=8000
 
   # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
