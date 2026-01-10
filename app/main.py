@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import StreamingResponse
 from pymilvus import MilvusClient, DataType
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
@@ -104,7 +105,7 @@ async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
 
 # --- QUERY ENDPOINT ---
 @app.post("/query")
-async def query_rag(user_query: str = Form(...), machine_id: str = Form(None)):
+async def query_rag(user_query: str = Form(...), machine_id: str = Form(None), stream: bool = Form(False)):
     # 1. Embed user query
     query_vector = embed_model.encode(user_query).tolist()
 
@@ -130,16 +131,35 @@ async def query_rag(user_query: str = Form(...), machine_id: str = Form(None)):
     system_prompt = "You are a manufacturing assistant. Use the provided SOP context to answer the user's technical question precisely."
     prompt = f"CONTEXT FROM SOPS:\n{context_text}\n\nUSER QUESTION: {user_query}\n\nANSWER:"
 
-    response = llm_client.chat.completions.create(
-        model="openai/gpt-oss-20b",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2 # Keep it factual for manufacturing
-    )
+    if stream:
+        # Streaming response
+        def generate():
+            response = llm_client.chat.completions.create(
+                model="openai/gpt-oss-20b",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                stream=True
+            )
+            for chunk in response:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
 
-    return {
-        "answer": response.choices[0].message.content,
-        "sources_found": len(context_chunks)
-    }
+        return StreamingResponse(generate(), media_type="text/plain")
+    else:
+        # Non-streaming response
+        response = llm_client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2
+        )
+
+        return {
+            "answer": response.choices[0].message.content,
+            "sources_found": len(context_chunks)
+        }
