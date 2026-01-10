@@ -1,35 +1,17 @@
-services:
-  # 1. The LLM Server (Nemotron-3-Nano via llama.cpp)
-  llm-server:
-    image: nemotron-server:latest
-    container_name: gpt-server
-    restart: always
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - LLAMA_CTX_SIZE=${LLAMA_CTX_SIZE:-32768}
-      - LLAMA_N_GPU_LAYERS=999
-    volumes:
-      - /home/devmaster/.cache/huggingface:/models/nemotron
-    ports:
-      - "8000:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+# Base Docker Compose - Shared services (milvus + rag-api)
+# Use with an override file for the LLM server:
+#   docker compose -f docker-compose.yml -f docker-compose.nemotron.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.gptoss20b.yml up -d
+#
+# Or create a symlink for default behavior:
+#   ln -sf docker-compose.nemotron.yml docker-compose.override.yml
+#   docker compose up -d
 
-  # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
+services:
+  # 1. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
     image: milvusdb/milvus:v2.5.10-20250418-5a8c98a2-gpu-arm64
-    container_name: milvus-standalone
+    container_name: vector-db
     restart: always
     environment:
       - ETCD_USE_EMBED=true
@@ -55,7 +37,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 3. Your RAG API
+  # 2. RAG API
   rag-api:
     image: rag-api:latest
     container_name: rag-endpoint
