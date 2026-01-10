@@ -216,6 +216,7 @@ async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
 
 # --- QUERY ENDPOINT ---
 @app.post("/query")
+
 async def query_rag(
     request: Request,
     user_query: str = Form(...),

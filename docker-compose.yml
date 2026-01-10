@@ -13,6 +13,13 @@ services:
     image: milvusdb/milvus:v2.5.10-20250418-5a8c98a2-gpu-arm64
     container_name: vector-db
     restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       - ETCD_USE_EMBED=true
       - ETCD_DATA_DIR=/var/lib/milvus/etcd
