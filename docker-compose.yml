@@ -1,63 +1,63 @@
 services:
-  # 1. The LLM Server (vLLM) - NVIDIA Qwen3-32B-NVFP4 on official container
+  # 1. The LLM Server (Nemotron-3-Nano via llama.cpp)
   llm-server:
-    image: nvcr.io/nvidia/vllm:25.12-py3
+    image: nemotron-server:latest
     container_name: gpt-server
-    runtime: nvidia
     restart: always
-    ipc: host
-    ulimits:
-      memlock: -1
-      stack: 67108864
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - VLLM_USE_V1=1
-      - TORCH_CUDA_ARCH_LIST="12.0"
-      - PYTHONWARNINGS=ignore::UserWarning:torchvision.io.image
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - LLAMA_CTX_SIZE=${LLAMA_CTX_SIZE:-32768}
+      - LLAMA_N_GPU_LAYERS=999
     volumes:
-      - /home/devmaster/.cache/huggingface:/root/.cache/huggingface
+      - /home/devmaster/.cache/huggingface:/models/nemotron
     ports:
       - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"   # Max size of a single log file
-        max-file: "3"     # Keep only the last 3 files
-    entrypoint: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
-    command:
-      - --model=nvidia/Qwen3-32B-NVFP4
-      - --max-model-len=32768
-      - --gpu-memory-utilization=0.40
-      - --trust-remote-code
-      - --host=0.0.0.0
-      - --port=8000
+        max-size: "10m"
+        max-file: "3"
 
   # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
     image: milvusdb/milvus:v2.5.10-20250418-5a8c98a2-gpu-arm64
     container_name: milvus-standalone
-    runtime: nvidia
     restart: always
     environment:
       - ETCD_USE_EMBED=true
       - ETCD_DATA_DIR=/var/lib/milvus/etcd
       - COMMON_STORAGETYPE=local
+      - NVIDIA_VISIBLE_DEVICES=all
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
       - "19530:19530"
       - "9091:9091"
-    command: ["milvus", "run", "standalone"] 
+    command: ["milvus", "run", "standalone"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"   # Max size of a single log file
-        max-file: "3"     # Keep only the last 3 files
+        max-size: "10m"
+        max-file: "3"
 
   # 3. Your RAG API
   rag-api:
-    build:
-      context: ./app
+    image: rag-api:latest
     container_name: rag-endpoint
     environment:
       - MILVUS_URL=http://milvus:19530
@@ -73,8 +73,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"   # Max size of a single log file
-        max-file: "3"     # Keep only the last 3 files
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   milvus_data:
