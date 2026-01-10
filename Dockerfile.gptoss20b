@@ -1,0 +1,11 @@
+# GPT-OSS-20B with MXFP4 quantization for Dell Pro Max GB10 (ARM64 + Blackwell)
+# Uses official NVIDIA vLLM container
+
+FROM nvcr.io/nvidia/vllm:25.12-py3
+
+# Environment for Blackwell SM120
+ENV TORCH_CUDA_ARCH_LIST="12.0"
+ENV NVIDIA_VISIBLE_DEVICES=all
+
+# The base image already has vLLM configured
+# No additional setup needed for the official container
