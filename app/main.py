@@ -1,12 +1,42 @@
 import os
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import re
+import logging
+import sys
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse
+import asyncio
 from pymilvus import MilvusClient, DataType
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 import pypdf
 import io
 from bs4 import BeautifulSoup
+
+# --- LOGGING SETUP ---
+LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
+LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# Create logger
+logger = logging.getLogger("rag-api")
+logger.setLevel(logging.INFO)
+
+# Console handler (for docker logs)
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
+logger.addHandler(console_handler)
+
+# File handler with rotation (10MB max, keep 5 backups)
+LOG_DIR = os.getenv("LOG_DIR", "/app/logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+file_handler = RotatingFileHandler(
+    os.path.join(LOG_DIR, "rag-api.log"),
+    maxBytes=10*1024*1024,  # 10MB
+    backupCount=5
+)
+file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
+logger.addHandler(file_handler)
 
 app = FastAPI()
 
@@ -59,18 +89,98 @@ def extract_text_from_txt(content: bytes) -> str:
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".html", ".htm"}
 
+# --- CHUNKING HELPER ---
+def chunk_text(text: str, chunk_size: int = 1500, chunk_overlap: int = 200, min_chunk_size: int = 100) -> list[str]:
+    """
+    Structure-aware chunking that preserves JSON blocks and uses separator hierarchy.
+
+    Args:
+        text: Input text to chunk
+        chunk_size: Target chunk size in characters (~400 tokens)
+        chunk_overlap: Overlap between chunks in characters (~50 tokens)
+        min_chunk_size: Minimum chunk size to avoid tiny fragments
+
+    Returns:
+        List of text chunks
+    """
+    if not text or not text.strip():
+        return []
+
+    # Preserve JSON blocks by replacing them with placeholders
+    json_pattern = r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\])'
+    json_blocks = []
+
+    def replace_json(match):
+        json_blocks.append(match.group(0))
+        return f"__JSON_BLOCK_{len(json_blocks) - 1}__"
+
+    text_with_placeholders = re.sub(json_pattern, replace_json, text)
+
+    # Split using separator hierarchy
+    separators = ["\n\n", "\n", ". ", " "]
+
+    def split_by_separator(text_to_split: str, sep_index: int = 0) -> list[str]:
+        if sep_index >= len(separators):
+            return [text_to_split] if text_to_split.strip() else []
+
+        separator = separators[sep_index]
+        parts = text_to_split.split(separator)
+
+        result = []
+        for part in parts:
+            if len(part) <= chunk_size:
+                if part.strip():
+                    result.append(part + (separator if separator != " " else ""))
+            else:
+                result.extend(split_by_separator(part, sep_index + 1))
+        return result
+
+    segments = split_by_separator(text_with_placeholders)
+
+    # Merge segments into chunks with overlap
+    chunks = []
+    current_chunk = ""
+
+    for segment in segments:
+        if len(current_chunk) + len(segment) <= chunk_size:
+            current_chunk += segment
+        else:
+            if current_chunk.strip() and len(current_chunk.strip()) >= min_chunk_size:
+                chunks.append(current_chunk.strip())
+            # Start new chunk with overlap from previous
+            if chunk_overlap > 0 and current_chunk:
+                overlap_text = current_chunk[-chunk_overlap:] if len(current_chunk) > chunk_overlap else current_chunk
+                current_chunk = overlap_text + segment
+            else:
+                current_chunk = segment
+
+    # Add final chunk
+    if current_chunk.strip() and len(current_chunk.strip()) >= min_chunk_size:
+        chunks.append(current_chunk.strip())
+
+    # Restore JSON blocks in all chunks
+    def restore_json(chunk_text: str) -> str:
+        for i, json_block in enumerate(json_blocks):
+            chunk_text = chunk_text.replace(f"__JSON_BLOCK_{i}__", json_block)
+        return chunk_text
+
+    chunks = [restore_json(chunk) for chunk in chunks]
+
+    return chunks if chunks else [text.strip()[:chunk_size]]
+
 # --- INGESTION ENDPOINT ---
 @app.post("/ingest")
 async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
+    filename = file.filename.lower() if file.filename else ""
+    logger.info(f"INGEST | machine_id={machine_id} | file={filename}")
+
     try:
-        filename = file.filename.lower() if file.filename else ""
         ext = os.path.splitext(filename)[1]
 
         if ext not in SUPPORTED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {ext}. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
-            )
+            error_msg = f"Unsupported file type: {ext}. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
+            logger.warning(f"INGEST | REJECTED | {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
 
         content = await file.read()
 
@@ -82,9 +192,8 @@ async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
         else:  # .txt
             full_text = extract_text_from_txt(content)
 
-        # Chunking (Simple 500-word chunks with overlap)
-        words = full_text.split()
-        chunks = [" ".join(words[i:i+500]) for i in range(0, len(words), 400)]
+        # Chunking (Structure-aware with JSON preservation, ~400 tokens per chunk)
+        chunks = chunk_text(full_text, chunk_size=1500, chunk_overlap=200, min_chunk_size=100)
 
         # Embed and Insert
         data = []
@@ -97,69 +206,116 @@ async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
             })
 
         client.insert(collection_name=COLLECTION_NAME, data=data)
+        logger.info(f"INGEST | SUCCESS | machine_id={machine_id} | chunks={len(chunks)}")
         return {"status": "success", "chunks_ingested": len(chunks), "machine_id": machine_id, "file_type": ext}
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"INGEST | ERROR | machine_id={machine_id} | {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- QUERY ENDPOINT ---
 @app.post("/query")
-async def query_rag(user_query: str = Form(...), machine_id: str = Form(None), stream: bool = Form(False)):
-    # 1. Embed user query
-    query_vector = embed_model.encode(user_query).tolist()
 
-    # 2. Search Milvus (with optional Machine ID filter to be "Smart")
-    filter_expr = f"machine_id == '{machine_id}'" if machine_id else ""
+async def query_rag(
+    request: Request,
+    user_query: str = Form(...),
+    machine_id: str = Form(None),
+    stream: bool = Form(False)
+):
+    query_preview = user_query[:100] + "..." if len(user_query) > 100 else user_query
+    logger.info(f"QUERY | machine_id={machine_id} | stream={stream} | query={query_preview}")
 
-    search_res = client.search(
-        collection_name=COLLECTION_NAME,
-        data=[query_vector],
-        filter=filter_expr,
-        limit=3,
-        output_fields=["text"]
-    )
+    try:
+        # 1. Embed user query
+        query_vector = embed_model.encode(user_query).tolist()
 
-    # 3. Build Context
-    context_chunks = [res['entity']['text'] for res in search_res[0]]
-    context_text = "\n---\n".join(context_chunks)
+        # 2. Search Milvus (with optional Machine ID filter to be "Smart")
+        filter_expr = f"machine_id == '{machine_id}'" if machine_id else ""
 
-    if not context_chunks:
-        context_text = "No relevant SOP found for this machine."
-
-    # 4. Generate Answer using the 20B LLM
-    system_prompt = "You are a manufacturing assistant. Use the provided SOP context to answer the user's technical question precisely."
-    prompt = f"CONTEXT FROM SOPS:\n{context_text}\n\nUSER QUESTION: {user_query}\n\nANSWER:"
-
-    if stream:
-        # Streaming response
-        def generate():
-            response = llm_client.chat.completions.create(
-                model="openai/gpt-oss-20b",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                stream=True
-            )
-            for chunk in response:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-
-        return StreamingResponse(generate(), media_type="text/plain")
-    else:
-        # Non-streaming response
-        response = llm_client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2
+        search_res = client.search(
+            collection_name=COLLECTION_NAME,
+            data=[query_vector],
+            filter=filter_expr,
+            limit=3,
+            output_fields=["text"]
         )
 
-        return {
-            "answer": response.choices[0].message.content,
-            "sources_found": len(context_chunks)
-        }
+        # 3. Build Context
+        context_chunks = [res['entity']['text'] for res in search_res[0]]
+        context_text = "\n---\n".join(context_chunks)
+        logger.info(f"QUERY | MILVUS | found {len(context_chunks)} chunks")
+
+        if not context_chunks:
+            context_text = "No relevant SOP found for this machine."
+
+        # 4. Generate Answer using the LLM
+        system_prompt = "You are a manufacturing assistant. Use the provided SOP context to answer the user's technical question precisely."
+        prompt = f"CONTEXT FROM SOPS:\n{context_text}\n\nUSER QUESTION: {user_query}\n\nANSWER:"
+
+        if stream:
+            # Async streaming response with client disconnection detection
+            async def generate():
+                response = None
+                tokens_generated = 0
+                try:
+                    response = llm_client.chat.completions.create(
+                        model="openai/gpt-oss-20b",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.2,
+                        stream=True
+                    )
+                    for chunk in response:
+                        # Check if client disconnected
+                        if await request.is_disconnected():
+                            logger.warning(f"QUERY | CANCELLED | client disconnected after {tokens_generated} tokens")
+                            if response:
+                                response.close()
+                            return
+                        if chunk.choices[0].delta.content:
+                            tokens_generated += 1
+                            yield chunk.choices[0].delta.content
+                    logger.info(f"QUERY | SUCCESS | stream complete, {tokens_generated} tokens")
+                except GeneratorExit:
+                    # Client disconnected mid-stream
+                    logger.warning(f"QUERY | CANCELLED | client disconnected (GeneratorExit) after {tokens_generated} tokens")
+                    if response:
+                        response.close()
+                except Exception as e:
+                    error_msg = f"\n\n[ERROR] LLM generation failed: {type(e).__name__}: {e}"
+                    logger.error(f"QUERY | ERROR | {type(e).__name__}: {e}")
+                    yield error_msg
+
+            return StreamingResponse(generate(), media_type="text/plain")
+        else:
+            # Non-streaming response
+            try:
+                response = llm_client.chat.completions.create(
+                    model="openai/gpt-oss-20b",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2
+                )
+                logger.info(f"QUERY | SUCCESS | non-stream complete")
+                return {
+                    "answer": response.choices[0].message.content,
+                    "sources_found": len(context_chunks)
+                }
+            except Exception as e:
+                error_msg = f"LLM generation failed: {type(e).__name__}: {e}"
+                logger.error(f"QUERY | ERROR | {error_msg}")
+                return {
+                    "answer": f"[ERROR] {error_msg}",
+                    "sources_found": len(context_chunks),
+                    "error": True
+                }
+
+    except Exception as e:
+        error_msg = f"Query processing failed: {type(e).__name__}: {e}"
+        logger.error(f"QUERY | ERROR | {error_msg}")
+        raise HTTPException(status_code=500, detail=error_msg)

@@ -1,0 +1,122 @@
+# Nemotron-3-Nano LLM Server using llama.cpp
+# Alternative gpt-server container for Dell Pro Max GB10 (ARM64 + Blackwell SM120)
+# Based on: https://build.nvidia.com/spark/nemotron/instructions
+# Build fix: https://forums.developer.nvidia.com/t/building-llama-cpp-container-images-for-spark-gb10/353664
+
+FROM nvidia/cuda:13.1.0-devel-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# Build parallelism settings
+ARG BUILD_JOBS=8
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
+
+# CRITICAL: Set LD_LIBRARY_PATH to CUDA compat libs for linking during build
+# This resolves: "libcuda.so.1, needed by...libggml-cuda.so, not found"
+ENV LD_LIBRARY_PATH=/usr/local/cuda-13/compat:${LD_LIBRARY_PATH}
+
+# Model configuration
+ARG MODEL_REPO=unsloth/Nemotron-3-Nano-30B-A3B-GGUF
+ARG MODEL_FILE=Nemotron-3-Nano-30B-A3B-UD-Q8_K_XL.gguf
+ENV MODEL_PATH=/models/nemotron/${MODEL_FILE}
+
+# Server configuration (OpenAI-compatible API)
+ENV LLAMA_HOST=0.0.0.0
+ENV LLAMA_PORT=8000
+ENV LLAMA_N_GPU_LAYERS=999
+ENV LLAMA_CTX_SIZE=8192
+ENV LLAMA_THREADS=8
+
+# NVIDIA runtime configuration
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Install build dependencies
+RUN apt update && apt upgrade -y \
+    && apt install -y --no-install-recommends \
+        build-essential \
+        git \
+        cmake \
+        ninja-build \
+        curl \
+        wget \
+        python3 \
+        python3-pip \
+        python3-venv \
+        pkg-config \
+        libcurl4-openssl-dev \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install huggingface-cli for model download
+RUN pip install --no-cache-dir "huggingface_hub[cli,hf_transfer]" \
+    && ln -sf /usr/local/bin/huggingface-cli /usr/bin/huggingface-cli 2>/dev/null || true
+
+# Clone llama.cpp
+WORKDIR /opt
+RUN git clone https://github.com/ggml-org/llama.cpp.git
+
+# Build llama.cpp with CUDA support for Spark/GB10 (SM121)
+WORKDIR /opt/llama.cpp
+RUN cmake -B build \
+        -G Ninja \
+        -DGGML_CUDA=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="121a-real" \
+        -DLLAMA_CURL=ON \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build build --target llama-server -j${BUILD_JOBS}
+
+# Create model directory
+RUN mkdir -p /models/nemotron
+
+# Download model at build time (optional - can be mounted instead)
+# Uncomment the following line to bake the model into the image:
+# RUN huggingface-cli download ${MODEL_REPO} ${MODEL_FILE} --local-dir /models/nemotron
+
+# Create startup script with environment variable support
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+MODEL_REPO="${MODEL_REPO:-unsloth/Nemotron-3-Nano-30B-A3B-GGUF}"\n\
+MODEL_FILE="${MODEL_FILE:-Nemotron-3-Nano-30B-A3B-UD-Q8_K_XL.gguf}"\n\
+MODEL_PATH="${MODEL_PATH:-/models/nemotron/${MODEL_FILE}}"\n\
+\n\
+# Check if model exists, download if not\n\
+if [ ! -f "${MODEL_PATH}" ]; then\n\
+    echo "Model not found at ${MODEL_PATH}"\n\
+    echo "Downloading ${MODEL_FILE} from ${MODEL_REPO}..."\n\
+    python3 -c "\n\
+from huggingface_hub import hf_hub_download\n\
+import os\n\
+hf_hub_download(\n\
+    repo_id=os.environ.get(\"MODEL_REPO\", \"unsloth/Nemotron-3-Nano-30B-A3B-GGUF\"),\n\
+    filename=os.environ.get(\"MODEL_FILE\", \"Nemotron-3-Nano-30B-A3B-UD-Q8_K_XL.gguf\"),\n\
+    local_dir=\"/models/nemotron\",\n\
+    local_dir_use_symlinks=False\n\
+)\n\
+"\n\
+fi\n\
+\n\
+echo "Starting llama-server with Nemotron-3-Nano..."\n\
+exec /opt/llama.cpp/build/bin/llama-server \\\n\
+    --model "${MODEL_PATH}" \\\n\
+    --host "${LLAMA_HOST:-0.0.0.0}" \\\n\
+    --port "${LLAMA_PORT:-8000}" \\\n\
+    --n-gpu-layers "${LLAMA_N_GPU_LAYERS:-999}" \\\n\
+    --ctx-size "${LLAMA_CTX_SIZE:-8192}" \\\n\
+    --threads "${LLAMA_THREADS:-8}" \\\n\
+    "$@"\n\
+' > /usr/local/bin/start-server.sh \
+    && chmod +x /usr/local/bin/start-server.sh
+
+EXPOSE 8000
+
+# Health check for OpenAI-compatible endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:${LLAMA_PORT}/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/start-server.sh"]

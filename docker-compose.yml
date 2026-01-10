@@ -1,50 +1,17 @@
-services:
-  # 1. The LLM Server (vLLM) - OpenAI GPT-OSS-20B with MXFP4 quantization
-  llm-server:
-    build:
-      context: .
-      dockerfile: Dockerfile.gptoss20b
-    container_name: gpt-server
-    restart: always
-    ipc: host
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    ulimits:
-      memlock: -1
-      stack: 67108864
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - VLLM_USE_V1=1
-      - TORCH_CUDA_ARCH_LIST="12.0"
-      - PYTHONWARNINGS=ignore::UserWarning:torchvision.io.image
-    volumes:
-      - /home/devmaster/.cache/huggingface:/root/.cache/huggingface
-    ports:
-      - "8000:8000"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"   # Max size of a single log file
-        max-file: "3"     # Keep only the last 3 files
-    entrypoint: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
-    command:
-      - --model=openai/gpt-oss-20b
-      - --quantization=mxfp4
-      - --max-model-len=32768
-      - --gpu-memory-utilization=0.35
-      - --trust-remote-code
-      - --host=0.0.0.0
-      - --port=8000
+# Base Docker Compose - Shared services (milvus + rag-api)
+# Use with an override file for the LLM server:
+#   docker compose -f docker-compose.yml -f docker-compose.nemotron.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.gptoss20b.yml up -d
+#
+# Or create a symlink for default behavior:
+#   ln -sf docker-compose.nemotron.yml docker-compose.override.yml
+#   docker compose up -d
 
-  # 2. Milvus Vector DB (Standalone mode with embedded etcd/minio)
+services:
+  # 1. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
     image: milvusdb/milvus:v2.5.10-20250418-5a8c98a2-gpu-arm64
-    container_name: milvus-standalone
+    container_name: vector-db
     restart: always
     deploy:
       resources:
@@ -57,22 +24,29 @@ services:
       - ETCD_USE_EMBED=true
       - ETCD_DATA_DIR=/var/lib/milvus/etcd
       - COMMON_STORAGETYPE=local
+      - NVIDIA_VISIBLE_DEVICES=all
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
       - "19530:19530"
       - "9091:9091"
-    command: ["milvus", "run", "standalone"] 
+    command: ["milvus", "run", "standalone"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"   # Max size of a single log file
-        max-file: "3"     # Keep only the last 3 files
+        max-size: "10m"
+        max-file: "3"
 
-  # 3. Your RAG API
+  # 2. RAG API
   rag-api:
-    build:
-      context: ./app
+    image: rag-api:latest
     container_name: rag-endpoint
     environment:
       - MILVUS_URL=http://milvus:19530
@@ -88,8 +62,8 @@ services:
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"   # Max size of a single log file
-        max-file: "3"     # Keep only the last 3 files
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   milvus_data:

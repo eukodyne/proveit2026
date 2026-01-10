@@ -1,0 +1,45 @@
+# LLM Server Override: GPT-OSS-20B via vLLM with MXFP4 quantization
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gptoss20b.yml up -d
+# Build: docker build -f Dockerfile.gptoss20b -t gptoss-server:latest .
+
+services:
+  llm-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.gptoss20b
+    container_name: gpt-server
+    restart: always
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - VLLM_USE_V1=1
+      - TORCH_CUDA_ARCH_LIST="12.0"
+      - PYTHONWARNINGS=ignore::UserWarning:torchvision.io.image
+    volumes:
+      - /home/devmaster/.cache/huggingface:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    entrypoint: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+    command:
+      - --model=openai/gpt-oss-20b
+      - --quantization=mxfp4
+      - --max-model-len=32768
+      - --gpu-memory-utilization=0.35
+      - --trust-remote-code
+      - --host=0.0.0.0
+      - --port=8000
