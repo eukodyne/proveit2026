@@ -13,7 +13,7 @@ services:
       - LLAMA_CTX_SIZE=${LLAMA_CTX_SIZE:-32768}
       - LLAMA_N_GPU_LAYERS=999
     volumes:
-      - /home/devmaster/.cache/huggingface:/models/nemotron
+      - /home/devpartner/.cache/huggingface:/models/nemotron
     ports:
       - "8000:8000"
     deploy:

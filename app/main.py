@@ -2,17 +2,53 @@ import os
 import re
 import logging
 import sys
+import json
+import time
+import uuid
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import asyncio
+from pydantic import BaseModel, Field
 from pymilvus import MilvusClient, DataType
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 import pypdf
 import io
 from bs4 import BeautifulSoup
+
+
+# --- OpenAI Chat Completion Models ---
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+class ChatCompletionRequest(BaseModel):
+    model: str = "openai/gpt-oss-20b"
+    messages: list[ChatMessage]
+    temperature: Optional[float] = 0.2
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+
+class ChatCompletionChoice(BaseModel):
+    index: int
+    message: ChatMessage
+    finish_reason: str
+
+class ChatCompletionUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: list[ChatCompletionChoice]
+    usage: Optional[ChatCompletionUsage] = None
 
 # --- LOGGING SETUP ---
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
@@ -318,4 +354,188 @@ async def query_rag(
     except Exception as e:
         error_msg = f"Query processing failed: {type(e).__name__}: {e}"
         logger.error(f"QUERY | ERROR | {error_msg}")
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
+# --- OpenAI-Compatible RAG Endpoint ---
+@app.post("/rag/{stream_param}/{machine_id}/v1/chat/completions")
+async def rag_chat_completions(
+    stream_param: str,
+    machine_id: str,
+    request: Request,
+    body: ChatCompletionRequest
+):
+    """
+    OpenAI-compatible chat completions endpoint that routes through the RAG pipeline.
+
+    URL format: /rag/{stream_param}/{machine_id}/v1/chat/completions
+    - stream_param: "stream" for streaming response, "no-stream" for non-streaming
+    - machine_id: The collection/machine ID for RAG retrieval
+
+    The last user message is used as the query for RAG retrieval.
+    """
+    # Validate stream_param
+    if stream_param not in ("stream", "no-stream"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stream parameter: '{stream_param}'. Must be 'stream' or 'no-stream'"
+        )
+
+    # Determine streaming from URL path (overrides body.stream)
+    use_stream = (stream_param == "stream")
+
+    # Extract the last user message as the query
+    user_messages = [msg for msg in body.messages if msg.role == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="No user message found in request")
+
+    user_query = user_messages[-1].content
+    query_preview = user_query[:100] + "..." if len(user_query) > 100 else user_query
+    logger.info(f"RAG-CHAT | machine_id={machine_id} | stream={use_stream} | query={query_preview}")
+
+    try:
+        # 1. Embed user query
+        query_vector = embed_model.encode(user_query).tolist()
+
+        # 2. Search Milvus with machine_id filter
+        filter_expr = f"machine_id == '{machine_id}'" if machine_id else ""
+
+        search_res = client.search(
+            collection_name=COLLECTION_NAME,
+            data=[query_vector],
+            filter=filter_expr,
+            limit=3,
+            output_fields=["text"]
+        )
+
+        # 3. Build Context
+        context_chunks = [res['entity']['text'] for res in search_res[0]]
+        context_text = "\n---\n".join(context_chunks)
+        logger.info(f"RAG-CHAT | MILVUS | found {len(context_chunks)} chunks")
+
+        if not context_chunks:
+            context_text = "No relevant SOP found for this machine."
+
+        # 4. Build messages with RAG context
+        system_prompt = "You are a manufacturing assistant. Use the provided SOP context to answer the user's technical question precisely."
+        rag_prompt = f"CONTEXT FROM SOPS:\n{context_text}\n\nUSER QUESTION: {user_query}\n\nANSWER:"
+
+        messages_for_llm = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": rag_prompt}
+        ]
+
+        # Generate unique ID for this completion
+        completion_id = f"chatcmpl-rag-{uuid.uuid4().hex[:12]}"
+        created_timestamp = int(time.time())
+
+        if use_stream:
+            # Streaming response in SSE format (OpenAI-compatible)
+            async def generate_sse():
+                tokens_generated = 0
+                response = None
+                try:
+                    response = llm_client.chat.completions.create(
+                        model=body.model,
+                        messages=messages_for_llm,
+                        temperature=body.temperature,
+                        max_tokens=body.max_tokens,
+                        stream=True
+                    )
+
+                    for chunk in response:
+                        # Check if client disconnected
+                        if await request.is_disconnected():
+                            logger.warning(f"RAG-CHAT | CANCELLED | client disconnected after {tokens_generated} tokens")
+                            if response:
+                                response.close()
+                            return
+
+                        delta_content = chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
+                        finish_reason = chunk.choices[0].finish_reason
+
+                        # Build SSE chunk in OpenAI format
+                        sse_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_timestamp,
+                            "model": body.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": delta_content} if delta_content else {},
+                                "finish_reason": finish_reason
+                            }]
+                        }
+
+                        if delta_content or finish_reason:
+                            tokens_generated += 1
+                            yield f"data: {json.dumps(sse_chunk)}\n\n"
+
+                    # Send [DONE] marker
+                    yield "data: [DONE]\n\n"
+                    logger.info(f"RAG-CHAT | SUCCESS | stream complete, {tokens_generated} chunks")
+
+                except GeneratorExit:
+                    logger.warning(f"RAG-CHAT | CANCELLED | client disconnected (GeneratorExit) after {tokens_generated} tokens")
+                    if response:
+                        response.close()
+                except Exception as e:
+                    error_chunk = {
+                        "error": {
+                            "message": f"LLM generation failed: {type(e).__name__}: {e}",
+                            "type": "server_error"
+                        }
+                    }
+                    logger.error(f"RAG-CHAT | ERROR | {type(e).__name__}: {e}")
+                    yield f"data: {json.dumps(error_chunk)}\n\n"
+
+            return StreamingResponse(
+                generate_sse(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+        else:
+            # Non-streaming response
+            try:
+                response = llm_client.chat.completions.create(
+                    model=body.model,
+                    messages=messages_for_llm,
+                    temperature=body.temperature,
+                    max_tokens=body.max_tokens
+                )
+
+                answer = response.choices[0].message.content
+                logger.info(f"RAG-CHAT | SUCCESS | non-stream complete")
+
+                return ChatCompletionResponse(
+                    id=completion_id,
+                    created=created_timestamp,
+                    model=body.model,
+                    choices=[
+                        ChatCompletionChoice(
+                            index=0,
+                            message=ChatMessage(role="assistant", content=answer),
+                            finish_reason="stop"
+                        )
+                    ],
+                    usage=ChatCompletionUsage(
+                        prompt_tokens=len(rag_prompt.split()),
+                        completion_tokens=len(answer.split()),
+                        total_tokens=len(rag_prompt.split()) + len(answer.split())
+                    )
+                )
+            except Exception as e:
+                error_msg = f"LLM generation failed: {type(e).__name__}: {e}"
+                logger.error(f"RAG-CHAT | ERROR | {error_msg}")
+                raise HTTPException(status_code=500, detail=error_msg)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"RAG query processing failed: {type(e).__name__}: {e}"
+        logger.error(f"RAG-CHAT | ERROR | {error_msg}")
         raise HTTPException(status_code=500, detail=error_msg)

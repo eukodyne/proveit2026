@@ -31,13 +31,6 @@ services:
       - "19530:19530"
       - "9091:9091"
     command: ["milvus", "run", "standalone"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     logging:
       driver: "json-file"
       options:
@@ -46,6 +39,7 @@ services:
 
   # 2. RAG API
   rag-api:
+    build: ./app
     image: rag-api:latest
     container_name: rag-endpoint
     environment:
@@ -53,7 +47,7 @@ services:
       - VLLM_URL=http://llm-server:8000/v1
     volumes:
       - ./app:/app
-      - /home/devmaster/sop_documents:/documents
+      - /home/devpartner/sop_documents:/documents
     ports:
       - "8080:8080"
     depends_on:
@@ -65,5 +59,29 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # 3. n8n Workflow Automation
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: always
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - WEBHOOK_URL=http://localhost:5678/
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "5678:5678"
+    depends_on:
+      - rag-api
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   milvus_data:
+  n8n_data:

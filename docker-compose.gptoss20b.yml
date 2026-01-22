@@ -17,16 +17,17 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    ulimits:
-      memlock: -1
-      stack: 67108864
+    # ulimits removed - not supported in rootless Docker
+    # ulimits:
+    #   memlock: -1
+    #   stack: 67108864
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - VLLM_USE_V1=1
       - TORCH_CUDA_ARCH_LIST="12.0"
       - PYTHONWARNINGS=ignore::UserWarning:torchvision.io.image
     volumes:
-      - /home/devmaster/.cache/huggingface:/root/.cache/huggingface
+      - /home/devpartner/.cache/huggingface:/root/.cache/huggingface
     ports:
       - "8000:8000"
     logging:
