@@ -64,6 +64,11 @@ services:
     image: n8nio/n8n:latest
     container_name: n8n
     restart: always
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
