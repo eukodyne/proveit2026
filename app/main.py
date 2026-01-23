@@ -30,7 +30,20 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     temperature: Optional[float] = 0.2
     max_tokens: Optional[int] = None
-    stream: Optional[bool] = False
+    stream: Optional[bool] = None  # None = use URL path, True/False = explicit
+    # Additional OpenAI fields that n8n/LangChain may send
+    tools: Optional[list] = None
+    tool_choice: Optional[str | dict] = None
+    functions: Optional[list] = None
+    function_call: Optional[str | dict] = None
+    n: Optional[int] = None
+    stop: Optional[str | list[str]] = None
+    presence_penalty: Optional[float] = None
+    frequency_penalty: Optional[float] = None
+    top_p: Optional[float] = None
+
+    class Config:
+        extra = "allow"  # Allow additional fields we don't explicitly define
 
 class ChatCompletionChoice(BaseModel):
     index: int
@@ -49,6 +62,47 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: list[ChatCompletionChoice]
     usage: Optional[ChatCompletionUsage] = None
+
+
+# --- OpenAI Responses API Models ---
+class ResponsesInputMessage(BaseModel):
+    role: str
+    content: str
+
+class ResponsesTool(BaseModel):
+    type: str  # "file_search", "web_search", "code_interpreter", "function", etc.
+    # Additional fields depending on tool type (optional)
+
+class ResponsesRequest(BaseModel):
+    model: str = "openai/gpt-oss-20b"
+    input: str | list[ResponsesInputMessage]  # Can be string or message list
+    instructions: Optional[str] = None
+    temperature: Optional[float] = 0.2
+    max_output_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+    tools: Optional[list[ResponsesTool]] = None
+
+class ResponsesOutputContent(BaseModel):
+    type: str = "output_text"
+    text: str
+
+class ResponsesOutputMessage(BaseModel):
+    type: str = "message"
+    id: str
+    role: str = "assistant"
+    content: list[ResponsesOutputContent]
+
+class ResponsesResponse(BaseModel):
+    id: str
+    object: str = "response"
+    created_at: int
+    model: str
+    output: list[ResponsesOutputMessage]
+    usage: Optional[ChatCompletionUsage] = None
+
+
+# Built-in OpenAI tools that are not implemented
+UNSUPPORTED_OPENAI_TOOLS = {"file_search", "web_search", "code_interpreter"}
 
 # --- LOGGING SETUP ---
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
@@ -381,8 +435,17 @@ async def rag_chat_completions(
             detail=f"Invalid stream parameter: '{stream_param}'. Must be 'stream' or 'no-stream'"
         )
 
-    # Determine streaming from URL path (overrides body.stream)
-    use_stream = (stream_param == "stream")
+    # Debug: Log the full request body
+    logger.info(f"RAG-CHAT | DEBUG REQUEST | {body.model_dump_json()}")
+
+    # Determine streaming: body.stream takes precedence if explicitly set, otherwise use URL
+    # This allows n8n to control streaming via the API request
+    if body.stream is not None:
+        use_stream = body.stream
+        logger.info(f"RAG-CHAT | streaming from body.stream={body.stream}")
+    else:
+        use_stream = (stream_param == "stream")
+        logger.info(f"RAG-CHAT | streaming from URL param={stream_param}")
 
     # Extract the last user message as the query
     user_messages = [msg for msg in body.messages if msg.role == "user"]
@@ -431,9 +494,16 @@ async def rag_chat_completions(
 
         if use_stream:
             # Streaming response in SSE format (OpenAI-compatible)
+            # Format per OpenAI spec:
+            # 1. First chunk: delta: {"role": "assistant"} (no content field)
+            # 2. Content chunks: delta: {"content": "..."}
+            # 3. Final chunk: delta: {} with finish_reason: "stop"
+            # 4. End with: data: [DONE]
             async def generate_sse():
                 tokens_generated = 0
                 response = None
+                first_chunk = True
+                sent_finish = False
                 try:
                     response = llm_client.chat.completions.create(
                         model=body.model,
@@ -454,24 +524,65 @@ async def rag_chat_completions(
                         delta_content = chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
                         finish_reason = chunk.choices[0].finish_reason
 
-                        # Build SSE chunk in OpenAI format
-                        sse_chunk = {
-                            "id": completion_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_timestamp,
-                            "model": body.model,
-                            "choices": [{
-                                "index": 0,
-                                "delta": {"content": delta_content} if delta_content else {},
-                                "finish_reason": finish_reason
-                            }]
-                        }
-
-                        if delta_content or finish_reason:
+                        # First chunk: send role only (no content field)
+                        if first_chunk:
+                            first_chunk = False
+                            role_chunk = {
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_timestamp,
+                                "model": body.model,
+                                "system_fingerprint": "fp_rag",
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {"role": "assistant"},
+                                    "logprobs": None,
+                                    "finish_reason": None
+                                }]
+                            }
+                            yield f"data: {json.dumps(role_chunk)}\n\n"
                             tokens_generated += 1
-                            yield f"data: {json.dumps(sse_chunk)}\n\n"
 
-                    # Send [DONE] marker
+                        # Content chunks: send content only
+                        if delta_content:
+                            content_chunk = {
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_timestamp,
+                                "model": body.model,
+                                "system_fingerprint": "fp_rag",
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {"content": delta_content},
+                                    "logprobs": None,
+                                    "finish_reason": None
+                                }]
+                            }
+                            yield f"data: {json.dumps(content_chunk)}\n\n"
+                            tokens_generated += 1
+
+                        # Track if we've seen finish_reason
+                        if finish_reason:
+                            sent_finish = True
+
+                    # Final chunk: empty delta with finish_reason
+                    finish_chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_timestamp,
+                        "model": body.model,
+                        "system_fingerprint": "fp_rag",
+                        "choices": [{
+                            "index": 0,
+                            "delta": {},
+                            "logprobs": None,
+                            "finish_reason": "stop"
+                        }]
+                    }
+                    yield f"data: {json.dumps(finish_chunk)}\n\n"
+                    tokens_generated += 1
+
+                    # Send [DONE] marker - REQUIRED
                     yield "data: [DONE]\n\n"
                     logger.info(f"RAG-CHAT | SUCCESS | stream complete, {tokens_generated} chunks")
 
@@ -479,14 +590,39 @@ async def rag_chat_completions(
                     logger.warning(f"RAG-CHAT | CANCELLED | client disconnected (GeneratorExit) after {tokens_generated} tokens")
                     if response:
                         response.close()
+                    # Still send [DONE] on client disconnect
+                    yield "data: [DONE]\n\n"
                 except Exception as e:
-                    error_chunk = {
-                        "error": {
-                            "message": f"LLM generation failed: {type(e).__name__}: {e}",
-                            "type": "server_error"
-                        }
-                    }
                     logger.error(f"RAG-CHAT | ERROR | {type(e).__name__}: {e}")
+                    # Send error and [DONE]
+                    error_chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_timestamp,
+                        "model": body.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"content": f"\n\n[Error: {type(e).__name__}]"},
+                            "logprobs": None,
+                            "finish_reason": None
+                        }]
+                    }
+                    yield f"data: {json.dumps(error_chunk)}\n\n"
+                    # Send finish and [DONE] even on error
+                    finish_chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_timestamp,
+                        "model": body.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {},
+                            "logprobs": None,
+                            "finish_reason": "stop"
+                        }]
+                    }
+                    yield f"data: {json.dumps(finish_chunk)}\n\n"
+                    yield "data: [DONE]\n\n"
                     yield f"data: {json.dumps(error_chunk)}\n\n"
 
             return StreamingResponse(
@@ -538,4 +674,286 @@ async def rag_chat_completions(
     except Exception as e:
         error_msg = f"RAG query processing failed: {type(e).__name__}: {e}"
         logger.error(f"RAG-CHAT | ERROR | {error_msg}")
+        raise HTTPException(status_code=500, detail=error_msg)
+
+
+# --- OpenAI Responses API RAG Endpoint ---
+@app.post("/rag/{stream_param}/{machine_id}/v1/responses")
+async def rag_responses(
+    stream_param: str,
+    machine_id: str,
+    request: Request,
+    body: ResponsesRequest
+):
+    """
+    OpenAI Responses API-compatible endpoint that routes through the RAG pipeline.
+
+    URL format: /rag/{stream_param}/{machine_id}/v1/responses
+    - stream_param: "stream" for streaming response, "no-stream" for non-streaming
+    - machine_id: The collection/machine ID for RAG retrieval
+
+    Note: Built-in OpenAI tools (file_search, web_search, code_interpreter) are not
+    implemented. Use n8n's native tool integrations for these capabilities.
+    """
+    # Validate stream_param
+    if stream_param not in ("stream", "no-stream"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid stream parameter: '{stream_param}'. Must be 'stream' or 'no-stream'"
+        )
+
+    # Check for unsupported OpenAI built-in tools
+    if body.tools:
+        unsupported_requested = [
+            tool.type for tool in body.tools if tool.type in UNSUPPORTED_OPENAI_TOOLS
+        ]
+        if unsupported_requested:
+            error_msg = f"Tool not implemented: {', '.join(unsupported_requested)}. " \
+                        f"These are OpenAI-hosted tools not available on this endpoint. " \
+                        f"Use n8n's native tool integrations (SerpAPI, Google Search, etc.) instead."
+            logger.warning(f"RAG-RESPONSES | REJECTED | unsupported tools: {unsupported_requested}")
+            raise HTTPException(status_code=501, detail=error_msg)
+
+    # Determine streaming from URL path (overrides body.stream)
+    use_stream = (stream_param == "stream")
+
+    # Extract user query from input (string or last user message)
+    if isinstance(body.input, str):
+        user_query = body.input
+    else:
+        user_messages = [m for m in body.input if m.role == "user"]
+        if not user_messages:
+            raise HTTPException(status_code=400, detail="No user message found in input")
+        user_query = user_messages[-1].content
+
+    query_preview = user_query[:100] + "..." if len(user_query) > 100 else user_query
+    logger.info(f"RAG-RESPONSES | machine_id={machine_id} | stream={use_stream} | query={query_preview}")
+
+    try:
+        # 1. Embed user query
+        query_vector = embed_model.encode(user_query).tolist()
+
+        # 2. Search Milvus with machine_id filter
+        filter_expr = f"machine_id == '{machine_id}'" if machine_id else ""
+
+        search_res = client.search(
+            collection_name=COLLECTION_NAME,
+            data=[query_vector],
+            filter=filter_expr,
+            limit=3,
+            output_fields=["text"]
+        )
+
+        # 3. Build Context
+        context_chunks = [res['entity']['text'] for res in search_res[0]]
+        context_text = "\n---\n".join(context_chunks)
+        logger.info(f"RAG-RESPONSES | MILVUS | found {len(context_chunks)} chunks")
+
+        if not context_chunks:
+            context_text = "No relevant SOP found for this machine."
+
+        # 4. Build messages with RAG context
+        system_prompt = body.instructions or "You are a manufacturing assistant. Use the provided SOP context to answer the user's technical question precisely."
+        rag_prompt = f"CONTEXT FROM SOPS:\n{context_text}\n\nUSER QUESTION: {user_query}\n\nANSWER:"
+
+        messages_for_llm = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": rag_prompt}
+        ]
+
+        # Generate unique IDs for this response
+        response_id = f"resp-rag-{uuid.uuid4().hex[:12]}"
+        message_id = f"msg-{uuid.uuid4().hex[:12]}"
+        created_timestamp = int(time.time())
+
+        if use_stream:
+            # Streaming response in SSE format (Responses API format)
+            # OpenAI Responses API uses "event:" prefix before "data:" lines
+            async def generate_sse():
+                tokens_generated = 0
+                full_text = ""
+                response = None
+                try:
+                    # Send initial response.created event
+                    created_event = {
+                        "type": "response.created",
+                        "response": {
+                            "id": response_id,
+                            "object": "response",
+                            "created_at": created_timestamp,
+                            "model": body.model,
+                            "status": "in_progress"
+                        }
+                    }
+                    yield f"event: response.created\ndata: {json.dumps(created_event)}\n\n"
+
+                    # Send output_item.added event
+                    item_added_event = {
+                        "type": "response.output_item.added",
+                        "output_index": 0,
+                        "item": {
+                            "type": "message",
+                            "id": message_id,
+                            "role": "assistant",
+                            "content": []
+                        }
+                    }
+                    yield f"event: response.output_item.added\ndata: {json.dumps(item_added_event)}\n\n"
+
+                    # Send content_part.added event
+                    content_part_event = {
+                        "type": "response.content_part.added",
+                        "output_index": 0,
+                        "content_index": 0,
+                        "part": {
+                            "type": "output_text",
+                            "text": ""
+                        }
+                    }
+                    yield f"event: response.content_part.added\ndata: {json.dumps(content_part_event)}\n\n"
+
+                    response = llm_client.chat.completions.create(
+                        model=body.model,
+                        messages=messages_for_llm,
+                        temperature=body.temperature,
+                        max_tokens=body.max_output_tokens,
+                        stream=True
+                    )
+
+                    for chunk in response:
+                        # Check if client disconnected
+                        if await request.is_disconnected():
+                            logger.warning(f"RAG-RESPONSES | CANCELLED | client disconnected after {tokens_generated} tokens")
+                            if response:
+                                response.close()
+                            return
+
+                        delta_content = chunk.choices[0].delta.content if chunk.choices[0].delta.content else ""
+                        finish_reason = chunk.choices[0].finish_reason
+
+                        if delta_content:
+                            tokens_generated += 1
+                            full_text += delta_content
+                            # Send content delta event
+                            delta_event = {
+                                "type": "response.output_text.delta",
+                                "output_index": 0,
+                                "content_index": 0,
+                                "delta": delta_content
+                            }
+                            yield f"event: response.output_text.delta\ndata: {json.dumps(delta_event)}\n\n"
+
+                    # Send output_text.done event
+                    text_done_event = {
+                        "type": "response.output_text.done",
+                        "output_index": 0,
+                        "content_index": 0,
+                        "text": full_text
+                    }
+                    yield f"event: response.output_text.done\ndata: {json.dumps(text_done_event)}\n\n"
+
+                    # Send output_item.done event
+                    item_done_event = {
+                        "type": "response.output_item.done",
+                        "output_index": 0,
+                        "item": {
+                            "type": "message",
+                            "id": message_id,
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": full_text}]
+                        }
+                    }
+                    yield f"event: response.output_item.done\ndata: {json.dumps(item_done_event)}\n\n"
+
+                    # Send response.completed event
+                    completed_event = {
+                        "type": "response.completed",
+                        "response": {
+                            "id": response_id,
+                            "object": "response",
+                            "created_at": created_timestamp,
+                            "model": body.model,
+                            "status": "completed",
+                            "output": [{
+                                "type": "message",
+                                "id": message_id,
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": full_text}]
+                            }],
+                            "usage": {
+                                "input_tokens": len(rag_prompt.split()),
+                                "output_tokens": tokens_generated,
+                                "total_tokens": len(rag_prompt.split()) + tokens_generated
+                            }
+                        }
+                    }
+                    yield f"event: response.completed\ndata: {json.dumps(completed_event)}\n\n"
+
+                    # Send [DONE] marker (no event prefix for this one)
+                    yield "data: [DONE]\n\n"
+                    logger.info(f"RAG-RESPONSES | SUCCESS | stream complete, {tokens_generated} chunks")
+
+                except GeneratorExit:
+                    logger.warning(f"RAG-RESPONSES | CANCELLED | client disconnected (GeneratorExit) after {tokens_generated} tokens")
+                    if response:
+                        response.close()
+                except Exception as e:
+                    error_event = {
+                        "type": "error",
+                        "error": {
+                            "message": f"LLM generation failed: {type(e).__name__}: {e}",
+                            "type": "server_error"
+                        }
+                    }
+                    logger.error(f"RAG-RESPONSES | ERROR | {type(e).__name__}: {e}")
+                    yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+
+            return StreamingResponse(
+                generate_sse(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+        else:
+            # Non-streaming response
+            try:
+                response = llm_client.chat.completions.create(
+                    model=body.model,
+                    messages=messages_for_llm,
+                    temperature=body.temperature,
+                    max_tokens=body.max_output_tokens
+                )
+
+                answer = response.choices[0].message.content
+                logger.info(f"RAG-RESPONSES | SUCCESS | non-stream complete")
+
+                return ResponsesResponse(
+                    id=response_id,
+                    created_at=created_timestamp,
+                    model=body.model,
+                    output=[
+                        ResponsesOutputMessage(
+                            id=message_id,
+                            content=[ResponsesOutputContent(text=answer)]
+                        )
+                    ],
+                    usage=ChatCompletionUsage(
+                        prompt_tokens=len(rag_prompt.split()),
+                        completion_tokens=len(answer.split()),
+                        total_tokens=len(rag_prompt.split()) + len(answer.split())
+                    )
+                )
+            except Exception as e:
+                error_msg = f"LLM generation failed: {type(e).__name__}: {e}"
+                logger.error(f"RAG-RESPONSES | ERROR | {error_msg}")
+                raise HTTPException(status_code=500, detail=error_msg)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"RAG query processing failed: {type(e).__name__}: {e}"
+        logger.error(f"RAG-RESPONSES | ERROR | {error_msg}")
         raise HTTPException(status_code=500, detail=error_msg)
