@@ -262,44 +262,54 @@ def chunk_text(text: str, chunk_size: int = 1500, chunk_overlap: int = 200, min_
 @app.get("/documents")
 async def list_documents(machine_id: str = None):
     """
-    List all documents in the RAG system.
+    List all documents in the RAG system, grouped by original uploaded file.
 
     Query params:
         machine_id: Optional filter by machine_id
 
     Returns:
-        List of documents with id, machine_id, and text preview
+        List of documents with document_id, filename, machine_id, and chunk count
     """
     logger.info(f"LIST-DOCS | machine_id={machine_id}")
 
     try:
-        # Query all documents (or filtered by machine_id)
+        # Query all chunks (or filtered by machine_id)
         filter_expr = f"machine_id == '{machine_id}'" if machine_id else ""
 
-        # Use query to get all documents
+        # Use query to get all chunks
         results = client.query(
             collection_name=COLLECTION_NAME,
             filter=filter_expr if filter_expr else "",
-            output_fields=["id", "machine_id", "text"],
+            output_fields=["id", "machine_id", "text", "document_id", "filename"],
             limit=10000  # Reasonable limit
         )
 
-        # Format results with text preview
-        documents = []
-        for doc in results:
-            text_preview = doc["text"][:200] + "..." if len(doc["text"]) > 200 else doc["text"]
-            documents.append({
-                "id": doc["id"],
-                "machine_id": doc["machine_id"],
-                "text_preview": text_preview
-            })
+        # Group chunks by document_id
+        documents_map = {}
+
+        for chunk in results:
+            doc_id = chunk.get("document_id")
+            if doc_id:
+                if doc_id not in documents_map:
+                    documents_map[doc_id] = {
+                        "document_id": doc_id,
+                        "filename": chunk.get("filename", "unknown"),
+                        "machine_id": chunk["machine_id"],
+                        "chunk_count": 0,
+                        "chunk_ids": []
+                    }
+                documents_map[doc_id]["chunk_count"] += 1
+                documents_map[doc_id]["chunk_ids"].append(chunk["id"])
+
+        documents = list(documents_map.values())
 
         # Get unique machine_ids for summary
-        unique_machines = list(set(doc["machine_id"] for doc in results))
+        unique_machines = list(set(chunk["machine_id"] for chunk in results)) if results else []
 
-        logger.info(f"LIST-DOCS | SUCCESS | {len(documents)} chunks, {len(unique_machines)} machines")
+        logger.info(f"LIST-DOCS | SUCCESS | {len(documents)} documents, {len(results)} total chunks, {len(unique_machines)} machines")
         return {
-            "total_chunks": len(documents),
+            "total_documents": len(documents),
+            "total_chunks": len(results),
             "unique_machines": unique_machines,
             "documents": documents
         }
@@ -308,14 +318,123 @@ async def list_documents(machine_id: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- DELETE DOCUMENTS ENDPOINTS ---
+@app.delete("/documents/{machine_id}")
+async def delete_by_machine(machine_id: str):
+    """
+    Delete all documents for a specific machine_id.
+
+    Path params:
+        machine_id: The machine ID to delete all documents for
+
+    Returns:
+        Number of documents deleted
+    """
+    logger.info(f"DELETE-DOCS | machine_id={machine_id}")
+
+    try:
+        # First count how many documents will be deleted
+        results = client.query(
+            collection_name=COLLECTION_NAME,
+            filter=f"machine_id == '{machine_id}'",
+            output_fields=["id"],
+            limit=10000
+        )
+
+        count = len(results)
+
+        if count == 0:
+            logger.warning(f"DELETE-DOCS | NOT FOUND | machine_id={machine_id}")
+            raise HTTPException(status_code=404, detail=f"No documents found for machine_id: {machine_id}")
+
+        # Delete all documents with this machine_id
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            filter=f"machine_id == '{machine_id}'"
+        )
+
+        logger.info(f"DELETE-DOCS | SUCCESS | machine_id={machine_id} | deleted={count}")
+        return {
+            "status": "success",
+            "machine_id": machine_id,
+            "documents_deleted": count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"DELETE-DOCS | ERROR | {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/documents/{machine_id}/{document_id}")
+async def delete_document(machine_id: str, document_id: str):
+    """
+    Delete a specific document (all its chunks) by document_id for a given machine_id.
+
+    Path params:
+        machine_id: The machine ID (for verification)
+        document_id: The document UUID (all chunks from the same uploaded file share this)
+
+    Returns:
+        Confirmation of deletion with chunk count
+    """
+    logger.info(f"DELETE-DOC | machine_id={machine_id} | document_id={document_id}")
+
+    try:
+        # Find all chunks belonging to this document_id
+        results = client.query(
+            collection_name=COLLECTION_NAME,
+            filter=f"document_id == '{document_id}'",
+            output_fields=["id", "machine_id", "filename"],
+            limit=10000
+        )
+
+        if not results:
+            logger.warning(f"DELETE-DOC | NOT FOUND | document_id={document_id}")
+            raise HTTPException(status_code=404, detail=f"Document not found: {document_id}")
+
+        # Verify the document belongs to this machine_id
+        doc_machine_id = results[0]["machine_id"]
+        if doc_machine_id != machine_id:
+            logger.warning(f"DELETE-DOC | MISMATCH | document_id={document_id} belongs to {doc_machine_id}, not {machine_id}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document {document_id} belongs to machine_id '{doc_machine_id}', not '{machine_id}'"
+            )
+
+        filename = results[0].get("filename", "unknown")
+        chunk_count = len(results)
+
+        # Delete all chunks with this document_id
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            filter=f"document_id == '{document_id}'"
+        )
+
+        logger.info(f"DELETE-DOC | SUCCESS | machine_id={machine_id} | document_id={document_id} | filename={filename} | chunks_deleted={chunk_count}")
+        return {
+            "status": "success",
+            "machine_id": machine_id,
+            "document_id": document_id,
+            "filename": filename,
+            "chunks_deleted": chunk_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"DELETE-DOC | ERROR | {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- INGESTION ENDPOINT ---
 @app.post("/ingest")
 async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
-    filename = file.filename.lower() if file.filename else ""
-    logger.info(f"INGEST | machine_id={machine_id} | file={filename}")
+    original_filename = file.filename if file.filename else "unknown"
+    filename_lower = original_filename.lower()
+    logger.info(f"INGEST | machine_id={machine_id} | file={original_filename}")
 
     try:
-        ext = os.path.splitext(filename)[1]
+        ext = os.path.splitext(filename_lower)[1]
 
         if ext not in SUPPORTED_EXTENSIONS:
             error_msg = f"Unsupported file type: {ext}. Supported: {', '.join(SUPPORTED_EXTENSIONS)}"
@@ -335,6 +454,9 @@ async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
         # Chunking (Structure-aware with JSON preservation, ~400 tokens per chunk)
         chunks = chunk_text(full_text, chunk_size=1500, chunk_overlap=200, min_chunk_size=100)
 
+        # Generate unique document_id for this upload (all chunks share this ID)
+        document_id = str(uuid.uuid4())
+
         # Embed and Insert
         data = []
         for chunk in chunks:
@@ -342,12 +464,21 @@ async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
             data.append({
                 "vector": embedding,
                 "text": chunk,
-                "machine_id": machine_id
+                "machine_id": machine_id,
+                "document_id": document_id,
+                "filename": original_filename
             })
 
         client.insert(collection_name=COLLECTION_NAME, data=data)
-        logger.info(f"INGEST | SUCCESS | machine_id={machine_id} | chunks={len(chunks)}")
-        return {"status": "success", "chunks_ingested": len(chunks), "machine_id": machine_id, "file_type": ext}
+        logger.info(f"INGEST | SUCCESS | machine_id={machine_id} | document_id={document_id} | chunks={len(chunks)}")
+        return {
+            "status": "success",
+            "document_id": document_id,
+            "filename": original_filename,
+            "chunks_ingested": len(chunks),
+            "machine_id": machine_id,
+            "file_type": ext
+        }
     except HTTPException:
         raise
     except Exception as e:

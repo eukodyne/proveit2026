@@ -9,6 +9,7 @@ A FastAPI-based Retrieval-Augmented Generation system for manufacturing SOPs usi
 **List All Documents**
 ```bash
 curl http://localhost:8080/documents
+# Returns: document_id, filename, machine_id, chunk_count for each document
 ```
 
 **List Documents by Machine ID**
@@ -16,11 +17,24 @@ curl http://localhost:8080/documents
 curl http://localhost:8080/documents?machine_id=CNC-001
 ```
 
+**Delete All Documents for a Machine**
+```bash
+curl -X DELETE http://localhost:8080/documents/CNC-001
+# Deletes all documents and their chunks for the specified machine_id
+```
+
+**Delete a Specific Document by Document ID**
+```bash
+curl -X DELETE http://localhost:8080/documents/CNC-001/7d33bf69-b055-45c7-93e1-c74ecc091aae
+# Deletes all chunks belonging to the specified document (by document_id UUID)
+```
+
 **Ingest a Document**
 ```bash
 curl -X POST http://localhost:8080/ingest \
   -F "machine_id=CNC-001" \
   -F "file=@document.pdf"
+# Returns: document_id (UUID), filename, chunks_ingested, machine_id
 ```
 
 **Query Documents**
