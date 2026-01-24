@@ -53,14 +53,22 @@ curl -X POST http://localhost:8080/query \
   -F "machine_id=CNC-001"
 ```
 
-**OpenAI-Compatible Chat Endpoint**
+**OpenAI-Compatible RAG Chat Endpoint**
 ```bash
-curl -X POST http://localhost:8080/v1/chat/completions \
+# Non-streaming
+curl -X POST http://localhost:8080/rag/no-stream/CNC-001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "rag",
-    "messages": [{"role": "user", "content": "How do I calibrate the spindle?"}],
-    "machine_id": "CNC-001"
+    "model": "openai/gpt-oss-20b",
+    "messages": [{"role": "user", "content": "How do I calibrate the spindle?"}]
+  }'
+
+# Streaming
+curl -X POST http://localhost:8080/rag/stream/CNC-001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-oss-20b",
+    "messages": [{"role": "user", "content": "How do I calibrate the spindle?"}]
   }'
 ```
 
