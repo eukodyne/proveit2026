@@ -6,6 +6,16 @@ A FastAPI-based Retrieval-Augmented Generation system for manufacturing SOPs usi
 
 ### RAG API (Port 8080)
 
+**List All Documents**
+```bash
+curl http://localhost:8080/documents
+```
+
+**List Documents by Machine ID**
+```bash
+curl http://localhost:8080/documents?machine_id=CNC-001
+```
+
 **Ingest a Document**
 ```bash
 curl -X POST http://localhost:8080/ingest \

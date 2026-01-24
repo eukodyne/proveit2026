@@ -258,6 +258,56 @@ def chunk_text(text: str, chunk_size: int = 1500, chunk_overlap: int = 200, min_
 
     return chunks if chunks else [text.strip()[:chunk_size]]
 
+# --- LIST DOCUMENTS ENDPOINT ---
+@app.get("/documents")
+async def list_documents(machine_id: str = None):
+    """
+    List all documents in the RAG system.
+
+    Query params:
+        machine_id: Optional filter by machine_id
+
+    Returns:
+        List of documents with id, machine_id, and text preview
+    """
+    logger.info(f"LIST-DOCS | machine_id={machine_id}")
+
+    try:
+        # Query all documents (or filtered by machine_id)
+        filter_expr = f"machine_id == '{machine_id}'" if machine_id else ""
+
+        # Use query to get all documents
+        results = client.query(
+            collection_name=COLLECTION_NAME,
+            filter=filter_expr if filter_expr else "",
+            output_fields=["id", "machine_id", "text"],
+            limit=10000  # Reasonable limit
+        )
+
+        # Format results with text preview
+        documents = []
+        for doc in results:
+            text_preview = doc["text"][:200] + "..." if len(doc["text"]) > 200 else doc["text"]
+            documents.append({
+                "id": doc["id"],
+                "machine_id": doc["machine_id"],
+                "text_preview": text_preview
+            })
+
+        # Get unique machine_ids for summary
+        unique_machines = list(set(doc["machine_id"] for doc in results))
+
+        logger.info(f"LIST-DOCS | SUCCESS | {len(documents)} chunks, {len(unique_machines)} machines")
+        return {
+            "total_chunks": len(documents),
+            "unique_machines": unique_machines,
+            "documents": documents
+        }
+    except Exception as e:
+        logger.error(f"LIST-DOCS | ERROR | {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- INGESTION ENDPOINT ---
 @app.post("/ingest")
 async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
