@@ -87,14 +87,15 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 4. Whisper Speech-to-Text Server
+  # 4. Whisper Speech-to-Text Server (TensorRT-LLM)
   whisper:
     build:
       context: .
-      dockerfile: Dockerfile.whisper
-    image: whisper-server:latest
-    container_name: whisper-server
+      dockerfile: Dockerfile.triton-whisper
+    image: whisper-trt:latest
+    container_name: whisper-trt
     restart: always
+    ipc: host
     ports:
       - "8001:8001"
     deploy:
@@ -106,9 +107,8 @@ services:
               capabilities: [gpu]
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - VLLM_USE_V1=0  # Whisper is encoder-decoder, requires V0 engine
     volumes:
-      - /home/devpartner/.cache/huggingface:/root/.cache/huggingface
+      - whisper_engines:/workspace/whisper_engine
     logging:
       driver: "json-file"
       options:
@@ -118,3 +118,6 @@ services:
 volumes:
   milvus_data:
   n8n_data:
+  whisper_engines:
+    external: true
+    name: whisper-engines
