@@ -483,6 +483,22 @@ async def ingest_doc(machine_id: str = Form(...), file: UploadFile = File(...)):
                 "filename": original_filename
             })
 
+        # Check for zero chunks (likely image-based PDF)
+        if len(chunks) == 0:
+            warning = None
+            if ext == ".pdf":
+                warning = "No text could be extracted from this PDF. This is likely an image-based or scanned PDF, which is not supported. Please use a text-based PDF."
+                logger.warning(f"INGEST | WARNING | machine_id={machine_id} | {warning}")
+            return {
+                "status": "warning",
+                "document_id": document_id,
+                "filename": original_filename,
+                "chunks_ingested": 0,
+                "machine_id": machine_id,
+                "file_type": ext,
+                "warning": warning or "No text content found in file."
+            }
+
         client.insert(collection_name=COLLECTION_NAME, data=data)
         logger.info(f"INGEST | SUCCESS | machine_id={machine_id} | document_id={document_id} | chunks={len(chunks)}")
         return {
