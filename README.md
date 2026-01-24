@@ -2,6 +2,103 @@
 
 A FastAPI-based Retrieval-Augmented Generation system for manufacturing SOPs using Milvus vector database and LLM inference.
 
+## API Endpoints
+
+### RAG API (Port 8080)
+
+**Ingest a Document**
+```bash
+curl -X POST http://localhost:8080/ingest \
+  -F "machine_id=CNC-001" \
+  -F "file=@document.pdf"
+```
+
+**Query Documents**
+```bash
+curl -X POST http://localhost:8080/query \
+  -F "user_query=How do I calibrate the spindle?" \
+  -F "machine_id=CNC-001"
+```
+
+**OpenAI-Compatible Chat Endpoint**
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "rag",
+    "messages": [{"role": "user", "content": "How do I calibrate the spindle?"}],
+    "machine_id": "CNC-001"
+  }'
+```
+
+### Whisper Speech-to-Text (Port 8001)
+
+**Transcribe Audio**
+```bash
+curl -X POST http://localhost:8001/v1/audio/transcriptions \
+  -F "file=@audio.mp3" \
+  -F "model=whisper"
+```
+
+**Transcribe with Language**
+```bash
+curl -X POST http://localhost:8001/v1/audio/transcriptions \
+  -F "file=@audio.mp3" \
+  -F "model=whisper" \
+  -F "language=en"
+```
+
+**Translate Audio to English**
+```bash
+curl -X POST http://localhost:8001/v1/audio/translations \
+  -F "file=@audio.mp3" \
+  -F "model=whisper"
+```
+
+**Health Check**
+```bash
+curl http://localhost:8001/health
+```
+
+### LLM Server (Port 8000)
+
+**Chat Completion**
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-oss-20b",
+    "messages": [{"role": "user", "content": "Hello, how are you?"}],
+    "max_tokens": 100
+  }'
+```
+
+**List Models**
+```bash
+curl http://localhost:8000/v1/models
+```
+
+### n8n Workflow Automation (Port 5678)
+
+**Web Interface**
+```
+http://localhost:5678
+```
+
+**Webhook Endpoint (example)**
+```bash
+curl -X POST http://localhost:5678/webhook/your-webhook-id \
+  -H "Content-Type: application/json" \
+  -d '{"message": "trigger workflow"}'
+```
+
+### Milvus Vector Database (Port 19530)
+
+**Health Check**
+```bash
+curl http://localhost:9091/healthz
+```
+
 ## Deployment Setup
 
 This system uses Docker Compose with override files to support multiple LLM backends.
@@ -26,11 +123,34 @@ cp docker-compose.gptoss20b.yml docker-compose.override.yml
 docker compose up -d
 ```
 
+This will start:
+- **Milvus** - Vector database for document embeddings
+- **RAG API** - FastAPI application for document ingestion and querying
+- **LLM Server** - OpenAI-compatible LLM inference server
+- **Whisper** - TensorRT-LLM speech-to-text (supports 8 concurrent users)
+- **n8n** - Workflow automation platform
+
 ### Step 3: Verify Services Are Running
 
 ```bash
 docker compose ps
 docker compose logs -f
+```
+
+### Step 4: Test Endpoints
+
+```bash
+# Test RAG API
+curl http://localhost:8080/docs
+
+# Test Whisper
+curl http://localhost:8001/health
+
+# Test LLM Server
+curl http://localhost:8000/v1/models
+
+# Test n8n
+curl http://localhost:5678
 ```
 
 ## Verifying Docker Auto-Start After Reboot
@@ -82,7 +202,7 @@ If containers don't start after reboot:
 sudo journalctl -u docker --since "boot"
 
 # Manually start containers if needed
-cd /home/devmaster/manufacturing-rag/manufacturing-rag
+cd /home/devpartner/manufacturing-rag
 docker compose up -d
 ```
 
@@ -90,7 +210,30 @@ docker compose up -d
 
 | Service | Port | Description |
 |---------|------|-------------|
-| RAG API | 8080 | FastAPI application |
-| LLM Server | 8000 | OpenAI-compatible API |
+| RAG API | 8080 | FastAPI application with /ingest and /query endpoints |
+| Whisper | 8001 | TensorRT-LLM speech-to-text (OpenAI-compatible) |
+| LLM Server | 8000 | OpenAI-compatible chat completions API |
+| n8n | 5678 | Workflow automation web interface |
 | Milvus | 19530 | Vector database |
-| Milvus Metrics | 9091 | Prometheus metrics |
+| Milvus Metrics | 9091 | Prometheus metrics and health checks |
+
+## Architecture
+
+```
+                    ┌─────────────────┐
+                    │   n8n (5678)    │
+                    │   Workflows     │
+                    └────────┬────────┘
+                             │
+┌─────────────┐    ┌────────▼────────┐    ┌─────────────────┐
+│   Whisper   │    │   RAG API       │    │   LLM Server    │
+│   (8001)    │───▶│   (8080)        │───▶│   (8000)        │
+│   STT       │    │   FastAPI       │    │   vLLM/llama    │
+└─────────────┘    └────────┬────────┘    └─────────────────┘
+                            │
+                   ┌────────▼────────┐
+                   │   Milvus        │
+                   │   (19530)       │
+                   │   Vector DB     │
+                   └─────────────────┘
+```
