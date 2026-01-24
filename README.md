@@ -2,6 +2,15 @@
 
 A FastAPI-based Retrieval-Augmented Generation system for manufacturing SOPs using Milvus vector database and LLM inference.
 
+## API Documentation (Swagger UI)
+
+Interactive API documentation is available via Swagger UI:
+
+- **Swagger UI**: http://localhost:8080/docs
+- **ReDoc**: http://localhost:8080/redoc
+
+Use Swagger UI to explore endpoints, view request/response schemas, and test API calls directly in the browser.
+
 ## API Endpoints
 
 ### RAG API (Port 8080)

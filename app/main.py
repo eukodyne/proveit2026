@@ -128,7 +128,21 @@ file_handler = RotatingFileHandler(
 file_handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
 logger.addHandler(file_handler)
 
-app = FastAPI()
+app = FastAPI(
+    title="Manufacturing RAG API",
+    description="""
+RAG (Retrieval-Augmented Generation) API for manufacturing SOPs.
+
+## Features
+- **Document Ingestion**: Upload PDF, TXT, HTML files for a machine
+- **Document Management**: List, delete documents by machine_id or document_id
+- **RAG Query**: Query documents with LLM-powered responses
+- **OpenAI-Compatible**: Chat completions and Responses API endpoints
+""",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 
 # 1. Configuration & Clients
 COLLECTION_NAME = "factory_sops"
