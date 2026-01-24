@@ -1,6 +1,10 @@
 # Whisper Speech-to-Text via vLLM
 # Model: RedHatAI/whisper-large-v3-FP8-dynamic
 # Based on Dockerfile.vllm_upgrade
+#
+# WARNING: This vLLM-based Whisper has known bugs and produces inaccurate
+# transcriptions. Use Dockerfile.triton-whisper (TensorRT-LLM) instead
+# until vLLM encoder-decoder bugs are fixed.
 
 FROM nvidia/cuda:13.1.0-devel-ubuntu24.04
 
