@@ -1,12 +1,3 @@
-# Base Docker Compose - Shared services (milvus + rag-api)
-# Use with an override file for the LLM server:
-#   docker compose -f docker-compose.yml -f docker-compose.nemotron.yml up -d
-#   docker compose -f docker-compose.yml -f docker-compose.gptoss20b.yml up -d
-#
-# Or create a symlink for default behavior:
-#   ln -sf docker-compose.nemotron.yml docker-compose.override.yml
-#   docker compose up -d
-
 services:
   # 1. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
@@ -37,7 +28,46 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 2. RAG API
+  # 2. LLM Server: GPT-OSS-20B via vLLM with MXFP4 quantization
+  llm-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.gptoss20b
+    container_name: gpt-server
+    restart: always
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - VLLM_USE_V1=1
+      - TORCH_CUDA_ARCH_LIST="12.0"
+      - PYTHONWARNINGS=ignore::UserWarning:torchvision.io.image
+    volumes:
+      - /home/devpartner/.cache/huggingface:/root/.cache/huggingface
+    ports:
+      - "8000:8000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    entrypoint: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+    command:
+      - --model=openai/gpt-oss-20b
+      - --quantization=mxfp4
+      - --max-model-len=32768
+      - --gpu-memory-utilization=0.35
+      - --trust-remote-code
+      - --host=0.0.0.0
+      - --port=8000
+
+  # 3. RAG API
   rag-api:
     build: ./app
     image: rag-api:latest
@@ -59,7 +89,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 3. n8n Workflow Automation
+  # 4. n8n Workflow Automation
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n
@@ -87,37 +117,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 4. Whisper Speech-to-Text Server (TensorRT-LLM)
-  whisper:
-    build:
-      context: .
-      dockerfile: Dockerfile.triton-whisper
-    image: whisper-trt:latest
-    container_name: whisper-trt
-    restart: always
-    ipc: host
-    ports:
-      - "8001:8001"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-    volumes:
-      - whisper_engines:/workspace/whisper_engine
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
 volumes:
   milvus_data:
   n8n_data:
-  whisper_engines:
-    external: true
-    name: whisper-engines

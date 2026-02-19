@@ -72,35 +72,6 @@ curl -X POST http://localhost:8080/rag/stream/CNC-001/v1/chat/completions \
   }'
 ```
 
-### Whisper Speech-to-Text (Port 8001)
-
-**Transcribe Audio**
-```bash
-curl -X POST http://localhost:8001/v1/audio/transcriptions \
-  -F "file=@audio.mp3" \
-  -F "model=whisper"
-```
-
-**Transcribe with Language**
-```bash
-curl -X POST http://localhost:8001/v1/audio/transcriptions \
-  -F "file=@audio.mp3" \
-  -F "model=whisper" \
-  -F "language=en"
-```
-
-**Translate Audio to English**
-```bash
-curl -X POST http://localhost:8001/v1/audio/translations \
-  -F "file=@audio.mp3" \
-  -F "model=whisper"
-```
-
-**Health Check**
-```bash
-curl http://localhost:8001/health
-```
-
 ### LLM Server (Port 8000)
 
 **Chat Completion**
@@ -142,50 +113,28 @@ curl http://localhost:9091/healthz
 
 ## Deployment Setup
 
-This system uses Docker Compose with override files to support multiple LLM backends.
-
-### Step 1: Choose Your LLM Backend
-
-Copy one of the LLM configuration files to `docker-compose.override.yml`:
-
-**Option A: Nemotron (llama.cpp)**
-```bash
-cp docker-compose.nemotron.yml docker-compose.override.yml
-```
-
-**Option B: GPT-OSS-20B (vLLM with MXFP4 quantization)**
-```bash
-cp docker-compose.gptoss20b.yml docker-compose.override.yml
-```
-
-### Step 2: Start the Services
-
 ```bash
 docker compose up -d
 ```
 
 This will start:
 - **Milvus** - Vector database for document embeddings
+- **LLM Server** - GPT-OSS-20B via vLLM with MXFP4 quantization
 - **RAG API** - FastAPI application for document ingestion and querying
-- **LLM Server** - OpenAI-compatible LLM inference server
-- **Whisper** - TensorRT-LLM speech-to-text (supports 8 concurrent users)
 - **n8n** - Workflow automation platform
 
-### Step 3: Verify Services Are Running
+### Verify Services Are Running
 
 ```bash
 docker compose ps
 docker compose logs -f
 ```
 
-### Step 4: Test Endpoints
+### Test Endpoints
 
 ```bash
 # Test RAG API
 curl http://localhost:8080/docs
-
-# Test Whisper
-curl http://localhost:8001/health
 
 # Test LLM Server
 curl http://localhost:8000/v1/models
@@ -252,7 +201,6 @@ docker compose up -d
 | Service | Port | Description |
 |---------|------|-------------|
 | RAG API | 8080 | FastAPI application with /ingest and /query endpoints |
-| Whisper | 8001 | TensorRT-LLM speech-to-text (OpenAI-compatible) |
 | LLM Server | 8000 | OpenAI-compatible chat completions API |
 | n8n | 5678 | Workflow automation web interface |
 | Milvus | 19530 | Vector database |
@@ -266,15 +214,15 @@ docker compose up -d
                     │   Workflows     │
                     └────────┬────────┘
                              │
-┌─────────────┐    ┌────────▼────────┐    ┌─────────────────┐
-│   Whisper   │    │   RAG API       │    │   LLM Server    │
-│   (8001)    │───▶│   (8080)        │───▶│   (8000)        │
-│   STT       │    │   FastAPI       │    │   vLLM/llama    │
-└─────────────┘    └────────┬────────┘    └─────────────────┘
-                            │
-                   ┌────────▼────────┐
-                   │   Milvus        │
-                   │   (19530)       │
-                   │   Vector DB     │
-                   └─────────────────┘
+                    ┌────────▼────────┐    ┌─────────────────┐
+                    │   RAG API       │───▶│   LLM Server    │
+                    │   (8080)        │    │   (8000)         │
+                    │   FastAPI       │    │   vLLM           │
+                    └────────┬────────┘    └─────────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │   Milvus        │
+                    │   (19530)       │
+                    │   Vector DB     │
+                    └─────────────────┘
 ```
