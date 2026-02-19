@@ -92,6 +92,85 @@ curl -X POST http://<ip_address>:8080/rag/stream/CNC-001/v1/chat/completions \
   }'
 ```
 
+### Tool-Calling Proxy (Port 8081)
+
+OpenAI-compatible endpoint with full tool-calling support for use with n8n AI Agent nodes. Supports both RAG-augmented and plain LLM modes.
+
+**Health Check**
+```bash
+curl http://<ip_address>:8081/health
+```
+
+**List Models**
+```bash
+curl http://<ip_address>:8081/v1/models
+```
+
+**Chat Completion (No RAG)**
+```bash
+curl -X POST http://<ip_address>:8081/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-oss-20b",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+**Chat Completion with RAG**
+```bash
+curl -X POST http://<ip_address>:8081/rag/CNC-001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-oss-20b",
+    "messages": [{"role": "user", "content": "How do I calibrate the spindle?"}]
+  }'
+```
+
+**Chat Completion with Tools**
+```bash
+curl -X POST http://<ip_address>:8081/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-oss-20b",
+    "messages": [{"role": "user", "content": "What is the weather in Dallas?"}],
+    "tools": [{
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get current weather for a city",
+        "parameters": {
+          "type": "object",
+          "properties": {"city": {"type": "string"}},
+          "required": ["city"]
+        }
+      }
+    }],
+    "tool_choice": "auto"
+  }'
+```
+
+**Swagger UI**: http://<ip_address>:8081/docs
+
+#### Connecting from n8n
+
+In n8n, use an **OpenAI Chat Model** node with custom credentials:
+
+| Setting | Value |
+|---------|-------|
+| **Base URL (no RAG)** | `http://tool-proxy:8081/v1` |
+| **Base URL (with RAG)** | `http://tool-proxy:8081/rag/{machine_id}/v1` |
+| **Model** | `openai/gpt-oss-20b` |
+| **API Key** | Any non-empty string (e.g., `not-needed`) |
+
+Replace `{machine_id}` with the actual machine ID for RAG retrieval (e.g., `press103`).
+
+Then attach tools to the AI Agent node normally — the proxy handles the full tool-calling loop:
+
+1. n8n sends messages + tool definitions
+2. LLM responds with `finish_reason: "tool_calls"` and `tool_calls` in the message
+3. n8n executes the tool and sends back the result as `role: "tool"`
+4. LLM responds with the final answer
+
 ### LLM Server (Port 8000)
 
 **Chat Completion**
@@ -141,6 +220,7 @@ This will start:
 - **Milvus** - Vector database for document embeddings
 - **LLM Server** - GPT-OSS-20B via vLLM with MXFP4 quantization
 - **RAG API** - FastAPI application for document ingestion and querying
+- **Tool-Calling Proxy** - OpenAI-compatible endpoint with tool support for n8n AI Agents
 - **n8n** - Workflow automation platform
 - **MySQL** - Database for n8n workflow data persistence
 
@@ -156,6 +236,9 @@ docker compose logs -f
 ```bash
 # Test RAG API
 curl http://<ip_address>:8080/docs
+
+# Test Tool-Calling Proxy
+curl http://<ip_address>:8081/health
 
 # Test LLM Server
 curl http://<ip_address>:8000/v1/models
@@ -259,6 +342,7 @@ Open the n8n web interface at `http://<ip_address>:5678` and configure workflows
 | Service | Container | Port | Description |
 |---------|-----------|------|-------------|
 | RAG API | p26-rag-endpoint | 8080 | FastAPI application with /ingest and /query endpoints |
+| Tool-Calling Proxy | p26-tool-proxy | 8081 | OpenAI-compatible endpoint with tool-calling support for n8n AI Agents |
 | LLM Server | p26-gpt-server | 8000 | OpenAI-compatible chat completions API |
 | n8n | p26-n8n | 5678 | Workflow automation web interface |
 | MySQL | p26-n8n-mysql | 3306 | Database for n8n workflow data persistence |
@@ -271,26 +355,31 @@ Open the n8n web interface at `http://<ip_address>:5678` and configure workflows
                     ┌─────────────────┐
                     │   n8n (5678)    │
                     │   Workflows     │
-                    └───┬─────────┬───┘
-                        │         │
-            depends_on  │         │  :3306
-                        │         │
-                    ┌───▼───┐ ┌───▼─────────────┐
-                    │  RAG  │ │   MySQL (3306)   │
-                    │  API  │ │   n8n_buffer DB  │
-                    │ (8080)│ │   [mysql_data]   │
-                    └─┬───┬─┘ └─────────────────┘
-                      │   │
-     http://milvus:   │   │  http://llm-server:
-           19530      │   │       8000/v1
-                      │   │
-           ┌──────────▼┐ ┌▼────────────────┐
-           │  Milvus   │ │   LLM Server    │
-           │  (19530)  │ │   (8000)        │
-           │  Vector DB│ │   vLLM/GPT-OSS  │
-           │[milvus_   │ └────────────────┘
-           │  data]    │
-           └───────────┘
+                    └─┬─────┬─────┬──┘
+                      │     │     │
+          depends_on  │     │     │  :3306
+                      │     │     │
+                 ┌────▼──┐  │  ┌──▼──────────────┐
+                 │  RAG  │  │  │  MySQL (3306)    │
+                 │  API  │  │  │  n8n_buffer DB   │
+                 │ (8080)│  │  │  [mysql_data]    │
+                 └─┬───┬─┘  │  └─────────────────┘
+                   │   │    │
+                   │   │  ┌─▼──────────────┐
+                   │   │  │  Tool Proxy    │
+                   │   │  │  (8081)        │
+                   │   │  │  Tool-calling  │
+                   │   │  └──┬──────┬──────┘
+                   │   │     │      │
+  http://milvus:   │   │     │      │  http://llm-server:
+        19530      │   ├─────┘      │       8000/v1
+                   │   │            │
+        ┌──────────▼───▼┐  ┌───────▼─────────┐
+        │  Milvus       │  │   LLM Server    │
+        │  (19530)      │  │   (8000)        │
+        │  Vector DB    │  │   vLLM/GPT-OSS  │
+        │  [milvus_data]│  └─────────────────┘
+        └───────────────┘
 
   [ ] = Docker named volume for persistence
 ```
@@ -300,9 +389,13 @@ Open the n8n web interface at `http://<ip_address>:5678` and configure workflows
 | Source | Destination | Connection | Purpose |
 |--------|-------------|------------|---------|
 | n8n | RAG API | `http://host.docker.internal:8080` | Workflow automation triggers RAG queries and ingestion |
+| n8n | Tool Proxy | `http://tool-proxy:8081/v1` | AI Agent tool-calling (no RAG) |
+| n8n | Tool Proxy | `http://tool-proxy:8081/rag/{machine_id}/v1` | AI Agent tool-calling (with RAG) |
 | n8n | MySQL | `p26-n8n-mysql:3306` | Persistent storage for workflow data |
 | RAG API | Milvus | `http://milvus:19530` | Vector similarity search for document retrieval |
 | RAG API | LLM Server | `http://llm-server:8000/v1` | LLM inference for answer generation |
+| Tool Proxy | Milvus | `http://milvus:19530` | Vector search for RAG-augmented tool-calling |
+| Tool Proxy | LLM Server | `http://llm-server:8000/v1` | LLM inference with tool-calling support |
 
 ### Startup Order
 
@@ -310,7 +403,7 @@ Services start in dependency order via `depends_on`:
 
 1. **Milvus** and **LLM Server** start first (no dependencies)
 2. **MySQL** starts independently (no dependencies)
-3. **RAG API** starts after Milvus and LLM Server are running
+3. **RAG API** and **Tool-Calling Proxy** start after Milvus and LLM Server are running
 4. **n8n** starts after RAG API is running
 
 ### Data Persistence

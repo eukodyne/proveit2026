@@ -66,6 +66,8 @@ services:
       - --trust-remote-code
       - --host=0.0.0.0
       - --port=8000
+      - --enable-auto-tool-choice
+      - --tool-call-parser=openai
 
   # 3. RAG API
   rag-api:
@@ -89,7 +91,28 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 4. n8n Workflow Automation
+  # 4. Tool-Calling Proxy (OpenAI-compatible with tool support)
+  tool-proxy:
+    image: rag-api:latest
+    container_name: p26-tool-proxy
+    environment:
+      - MILVUS_URL=http://milvus:19530
+      - VLLM_URL=http://llm-server:8000/v1
+    volumes:
+      - ./app:/app
+    ports:
+      - "8081:8081"
+    depends_on:
+      - llm-server
+      - milvus
+    command: ["uvicorn", "tool_proxy:app", "--host", "0.0.0.0", "--port", "8081"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 5. n8n Workflow Automation
   n8n:
     image: n8nio/n8n:latest
     container_name: p26-n8n
@@ -119,7 +142,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # 5. MySQL Database
+  # 6. MySQL Database
   mysql:
     image: mysql:latest
     container_name: p26-n8n-mysql
