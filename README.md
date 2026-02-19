@@ -197,6 +197,43 @@ cd /home/devpartner/manufacturing-rag
 docker compose up -d
 ```
 
+## n8n Workflow Setup
+
+This section documents the setup steps for configuring n8n workflows for the ProveIt2026 workshop.
+
+### Step 1: Start Services
+
+```bash
+docker compose up -d
+```
+
+### Step 2: Create the MQTT Buffer Table
+
+After the MySQL container is running, create the `mqtt_buffer` table used to store incoming MQTT messages for workflow processing:
+
+```bash
+docker exec p26-n8n-mysql mysql -uroot -ppassword n8n_buffer -e "
+CREATE TABLE IF NOT EXISTS mqtt_buffer (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    topic VARCHAR(255) NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;"
+```
+
+#### mqtt_buffer Schema
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INT AUTO_INCREMENT | Primary key |
+| `topic` | VARCHAR(255) | MQTT topic the message was received on |
+| `payload` | TEXT | Message payload (typically JSON) |
+| `created_at` | TIMESTAMP | Timestamp when the row was inserted (auto-populated) |
+
+### Step 3: Configure n8n
+
+Open the n8n web interface at `http://localhost:5678` and configure workflows to connect to the services above.
+
 ## Exposed Ports
 
 | Service | Container | Port | Description |
