@@ -20,12 +20,16 @@ This workshop demonstrates how to build and run AI-powered automation workflows 
 | Database | MySQL | MQTT message buffer and workflow data |
 | Hardware | Dell Pro Max GB10 | On-premises GPU compute |
 
+## Network Access
+
+Replace `<ip_address>` in all URLs below with the IP address of the Dell Pro Max GB10 on your VPN or Tailscale network (e.g., `100.91.207.62`).
+
 ## API Documentation (Swagger UI)
 
 Interactive API documentation is available via Swagger UI:
 
-- **Swagger UI**: http://localhost:8080/docs
-- **ReDoc**: http://localhost:8080/redoc
+- **Swagger UI**: http://<ip_address>:8080/docs
+- **ReDoc**: http://<ip_address>:8080/redoc
 
 ## API Endpoints
 
@@ -33,30 +37,30 @@ Interactive API documentation is available via Swagger UI:
 
 **List All Documents**
 ```bash
-curl http://localhost:8080/documents
+curl http://<ip_address>:8080/documents
 # Returns: document_id, filename, machine_id, chunk_count for each document
 ```
 
 **List Documents by Machine ID**
 ```bash
-curl http://localhost:8080/documents?machine_id=CNC-001
+curl http://<ip_address>:8080/documents?machine_id=CNC-001
 ```
 
 **Delete All Documents for a Machine**
 ```bash
-curl -X DELETE http://localhost:8080/documents/CNC-001
+curl -X DELETE http://<ip_address>:8080/documents/CNC-001
 # Deletes all documents and their chunks for the specified machine_id
 ```
 
 **Delete a Specific Document by Document ID**
 ```bash
-curl -X DELETE http://localhost:8080/documents/CNC-001/7d33bf69-b055-45c7-93e1-c74ecc091aae
+curl -X DELETE http://<ip_address>:8080/documents/CNC-001/7d33bf69-b055-45c7-93e1-c74ecc091aae
 # Deletes all chunks belonging to the specified document (by document_id UUID)
 ```
 
 **Ingest a Document**
 ```bash
-curl -X POST http://localhost:8080/ingest \
+curl -X POST http://<ip_address>:8080/ingest \
   -F "machine_id=CNC-001" \
   -F "file=@document.pdf"
 # Returns: document_id (UUID), filename, chunks_ingested, machine_id
@@ -64,7 +68,7 @@ curl -X POST http://localhost:8080/ingest \
 
 **Query Documents**
 ```bash
-curl -X POST http://localhost:8080/query \
+curl -X POST http://<ip_address>:8080/query \
   -F "user_query=How do I calibrate the spindle?" \
   -F "machine_id=CNC-001"
 ```
@@ -72,7 +76,7 @@ curl -X POST http://localhost:8080/query \
 **OpenAI-Compatible RAG Chat Endpoint**
 ```bash
 # Non-streaming
-curl -X POST http://localhost:8080/rag/no-stream/CNC-001/v1/chat/completions \
+curl -X POST http://<ip_address>:8080/rag/no-stream/CNC-001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/gpt-oss-20b",
@@ -80,7 +84,7 @@ curl -X POST http://localhost:8080/rag/no-stream/CNC-001/v1/chat/completions \
   }'
 
 # Streaming
-curl -X POST http://localhost:8080/rag/stream/CNC-001/v1/chat/completions \
+curl -X POST http://<ip_address>:8080/rag/stream/CNC-001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/gpt-oss-20b",
@@ -92,7 +96,7 @@ curl -X POST http://localhost:8080/rag/stream/CNC-001/v1/chat/completions \
 
 **Chat Completion**
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://<ip_address>:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/gpt-oss-20b",
@@ -103,19 +107,19 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 **List Models**
 ```bash
-curl http://localhost:8000/v1/models
+curl http://<ip_address>:8000/v1/models
 ```
 
 ### n8n Workflow Automation (Port 5678)
 
 **Web Interface**
 ```
-http://localhost:5678
+http://<ip_address>:5678
 ```
 
 **Webhook Endpoint (example)**
 ```bash
-curl -X POST http://localhost:5678/webhook/your-webhook-id \
+curl -X POST http://<ip_address>:5678/webhook/your-webhook-id \
   -H "Content-Type: application/json" \
   -d '{"message": "trigger workflow"}'
 ```
@@ -124,7 +128,7 @@ curl -X POST http://localhost:5678/webhook/your-webhook-id \
 
 **Health Check**
 ```bash
-curl http://localhost:9091/healthz
+curl http://<ip_address>:9091/healthz
 ```
 
 ## Deployment Setup
@@ -151,13 +155,13 @@ docker compose logs -f
 
 ```bash
 # Test RAG API
-curl http://localhost:8080/docs
+curl http://<ip_address>:8080/docs
 
 # Test LLM Server
-curl http://localhost:8000/v1/models
+curl http://<ip_address>:8000/v1/models
 
 # Test n8n
-curl http://localhost:5678
+curl http://<ip_address>:5678
 ```
 
 ## Verifying Docker Auto-Start After Reboot
@@ -248,7 +252,7 @@ CREATE TABLE IF NOT EXISTS mqtt_buffer (
 
 ### Step 3: Configure n8n
 
-Open the n8n web interface at `http://localhost:5678` and configure workflows to connect to the services above.
+Open the n8n web interface at `http://<ip_address>:5678` and configure workflows to connect to the services above.
 
 ## Exposed Ports
 
