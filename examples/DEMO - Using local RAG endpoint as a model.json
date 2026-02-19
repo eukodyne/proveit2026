@@ -1,0 +1,132 @@
+{
+  "name": "DEMO - Using local RAG endpoint as a model",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "1. Add your OpenAI API Key in \"OpenAI Chat Model\" node\n2. Add your MySQL credentials in the \"SQL DB - List Tables and Schema\" and \"Execute a SQL Query in MySQL nodes\"\n3. Update the database name in \"SQL DB - List Tables and Schema\" node. Replace \"your_query_name\" under the Query field with your actual database name\n\nNote: This agent can remember the previous 5 messages by default but can be adjusted in the \"Session Memory\" node",
+        "height": 528,
+        "width": 560
+      },
+      "id": "dd9e33b2-c0d6-4825-98ee-f3ed1d3310bb",
+      "name": "Sticky Note1",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "openai/gpt-oss-20b",
+          "mode": "list",
+          "cachedResultName": "openai/gpt-oss-20b"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        64,
+        384
+      ],
+      "id": "a1156de4-ccb4-4576-9bc2-f75a3cb55f98",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "05Fz6ljxvbFN1CgW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "enableStreaming": true
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        160,
+        208
+      ],
+      "id": "68637770-b259-4230-8bc5-5ab5350bac67",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "content": "Ask agent a question in plain English. AI Agent will execute a SQL query on your database for the answer",
+        "height": 288,
+        "width": 272
+      },
+      "id": "9602360e-930f-4b83-b6c8-00604f980f32",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -288,
+        80
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "public": true,
+        "availableInChat": true,
+        "options": {
+          "responseMode": "streaming"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -192,
+        208
+      ],
+      "id": "a673057b-b2b2-4c7e-b25c-95a184e6fc90",
+      "name": "When chat message received",
+      "webhookId": "e20fabe5-bfe5-4720-bbd9-c2859ae5f8d1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "9943240e-1b60-4b07-a40b-b012f5c1bbd2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b789af1ee2579cbdfc2d9053f4dcbde7f8c398012dc098fdef4d9659c59ee444"
+  },
+  "id": "EmciJeLoLl43TlXA",
+  "tags": []
+}

@@ -1,0 +1,105 @@
+{
+  "name": "DEMO - MQTT Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "topics": "eukodyne/Enterprise B/Site2/fillerproduction/fillingline01/workorder/customer-feedback-summary",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mqttTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        16
+      ],
+      "id": "2246cfe3-f3c5-44e6-a21f-bcdfa55c2276",
+      "name": "MQTT Trigger",
+      "credentials": {
+        "mqtt": {
+          "id": "gQXaYu3SKZtnEaSJ",
+          "name": "MQTT account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mqtt_buffer (topic, payload) \nVALUES (\n  '{{ $json.topic }}', \n  '{{ typeof $json.message === \"object\" ? JSON.stringify($json.message) : $json.message }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        16,
+        16
+      ],
+      "id": "5472bdf9-a2cf-4fd9-afaa-085bfee94fe7",
+      "name": "INSERT into MySql",
+      "credentials": {
+        "mySql": {
+          "id": "TiJ9mwMq2OCX21v3",
+          "name": "MySQL account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM mqtt_buffer \nWHERE created_at < DATE_SUB(NOW(), INTERVAL 48 HOUR);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        224,
+        16
+      ],
+      "id": "495e1797-d25d-4601-9648-3c7e949cb112",
+      "name": "Clean up old data",
+      "credentials": {
+        "mySql": {
+          "id": "TiJ9mwMq2OCX21v3",
+          "name": "MySQL account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "MQTT Trigger": {
+      "main": [
+        [
+          {
+            "node": "INSERT into MySql",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "INSERT into MySql": {
+      "main": [
+        [
+          {
+            "node": "Clean up old data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "28e67ab2-8b3c-4291-9a45-84f11ee5a6b0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b789af1ee2579cbdfc2d9053f4dcbde7f8c398012dc098fdef4d9659c59ee444"
+  },
+  "id": "PQGMkktmcWM83uet",
+  "tags": []
+}
