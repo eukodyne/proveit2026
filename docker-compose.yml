@@ -119,6 +119,25 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # 5. MySQL Database
+  mysql:
+    image: mysql:latest
+    container_name: p26-n8n-mysql
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=n8n_buffer
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   milvus_data:
   n8n_data:
+  mysql_data:
