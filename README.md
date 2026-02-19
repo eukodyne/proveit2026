@@ -1,6 +1,24 @@
-# Manufacturing RAG System
+# ProveIt 2026 Workshop
 
-A FastAPI-based Retrieval-Augmented Generation system for manufacturing SOPs using Milvus vector database and LLM inference.
+On-premises agentic AI workflows running on a Dell Pro Max GB10, orchestrated with n8n.
+
+This workshop demonstrates how to build and run AI-powered automation workflows entirely on local hardware — no cloud APIs required. All LLM inference, vector search, and workflow orchestration run on-premises.
+
+## Workshop Workflows
+
+- **RAG Chat** — Chat with a local LLM using Retrieval-Augmented Generation. Ingest manufacturing SOPs (PDF, TXT, HTML) and ask questions answered from your own documents.
+- **MQTT Data Ingestion** — Ingest messages from MQTT topics into a local MySQL database, then chat with the collected data using the local LLM.
+
+## Technology Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| Workflow Engine | n8n | Orchestrates agentic AI workflows |
+| LLM | GPT-OSS-20B via vLLM (MXFP4) | Local text generation |
+| Vector Database | Milvus (GPU-accelerated) | Document embedding storage and similarity search |
+| RAG API | FastAPI | Document ingestion and query endpoints |
+| Database | MySQL | MQTT message buffer and workflow data |
+| Hardware | Dell Pro Max GB10 | On-premises GPU compute |
 
 ## API Documentation (Swagger UI)
 
@@ -8,8 +26,6 @@ Interactive API documentation is available via Swagger UI:
 
 - **Swagger UI**: http://localhost:8080/docs
 - **ReDoc**: http://localhost:8080/redoc
-
-Use Swagger UI to explore endpoints, view request/response schemas, and test API calls directly in the browser.
 
 ## API Endpoints
 
