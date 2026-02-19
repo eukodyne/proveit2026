@@ -2,7 +2,7 @@ services:
   # 1. Milvus Vector DB (Standalone mode with embedded etcd/minio)
   milvus:
     image: milvusdb/milvus:v2.5.10-20250418-5a8c98a2-gpu-arm64
-    container_name: vector-db
+    container_name: p26-vector-db
     restart: always
     deploy:
       resources:
@@ -33,7 +33,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gptoss20b
-    container_name: gpt-server
+    container_name: p26-gpt-server
     restart: always
     ipc: host
     deploy:
@@ -71,7 +71,7 @@ services:
   rag-api:
     build: ./app
     image: rag-api:latest
-    container_name: rag-endpoint
+    container_name: p26-rag-endpoint
     environment:
       - MILVUS_URL=http://milvus:19530
       - VLLM_URL=http://llm-server:8000/v1
@@ -92,7 +92,7 @@ services:
   # 4. n8n Workflow Automation
   n8n:
     image: n8nio/n8n:latest
-    container_name: n8n
+    container_name: p26-n8n
     restart: always
     dns:
       - 1.1.1.1
