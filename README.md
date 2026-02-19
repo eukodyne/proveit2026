@@ -122,6 +122,7 @@ This will start:
 - **LLM Server** - GPT-OSS-20B via vLLM with MXFP4 quantization
 - **RAG API** - FastAPI application for document ingestion and querying
 - **n8n** - Workflow automation platform
+- **MySQL** - Database for n8n workflow data persistence
 
 ### Verify Services Are Running
 
@@ -198,13 +199,14 @@ docker compose up -d
 
 ## Exposed Ports
 
-| Service | Port | Description |
-|---------|------|-------------|
-| RAG API | 8080 | FastAPI application with /ingest and /query endpoints |
-| LLM Server | 8000 | OpenAI-compatible chat completions API |
-| n8n | 5678 | Workflow automation web interface |
-| Milvus | 19530 | Vector database |
-| Milvus Metrics | 9091 | Prometheus metrics and health checks |
+| Service | Container | Port | Description |
+|---------|-----------|------|-------------|
+| RAG API | p26-rag-endpoint | 8080 | FastAPI application with /ingest and /query endpoints |
+| LLM Server | p26-gpt-server | 8000 | OpenAI-compatible chat completions API |
+| n8n | p26-n8n | 5678 | Workflow automation web interface |
+| MySQL | p26-n8n-mysql | 3306 | Database for n8n workflow data persistence |
+| Milvus | p26-vector-db | 19530 | Vector database for document embeddings |
+| Milvus Metrics | p26-vector-db | 9091 | Prometheus metrics and health checks |
 
 ## Architecture
 
@@ -212,17 +214,54 @@ docker compose up -d
                     ┌─────────────────┐
                     │   n8n (5678)    │
                     │   Workflows     │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐    ┌─────────────────┐
-                    │   RAG API       │───▶│   LLM Server    │
-                    │   (8080)        │    │   (8000)         │
-                    │   FastAPI       │    │   vLLM           │
-                    └────────┬────────┘    └─────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │   Milvus        │
-                    │   (19530)       │
-                    │   Vector DB     │
-                    └─────────────────┘
+                    └───┬─────────┬───┘
+                        │         │
+            depends_on  │         │  :3306
+                        │         │
+                    ┌───▼───┐ ┌───▼─────────────┐
+                    │  RAG  │ │   MySQL (3306)   │
+                    │  API  │ │   n8n_buffer DB  │
+                    │ (8080)│ │   [mysql_data]   │
+                    └─┬───┬─┘ └─────────────────┘
+                      │   │
+     http://milvus:   │   │  http://llm-server:
+           19530      │   │       8000/v1
+                      │   │
+           ┌──────────▼┐ ┌▼────────────────┐
+           │  Milvus   │ │   LLM Server    │
+           │  (19530)  │ │   (8000)        │
+           │  Vector DB│ │   vLLM/GPT-OSS  │
+           │[milvus_   │ └────────────────┘
+           │  data]    │
+           └───────────┘
+
+  [ ] = Docker named volume for persistence
 ```
+
+### Service Connectivity
+
+| Source | Destination | Connection | Purpose |
+|--------|-------------|------------|---------|
+| n8n | RAG API | `http://host.docker.internal:8080` | Workflow automation triggers RAG queries and ingestion |
+| n8n | MySQL | `p26-n8n-mysql:3306` | Persistent storage for workflow data |
+| RAG API | Milvus | `http://milvus:19530` | Vector similarity search for document retrieval |
+| RAG API | LLM Server | `http://llm-server:8000/v1` | LLM inference for answer generation |
+
+### Startup Order
+
+Services start in dependency order via `depends_on`:
+
+1. **Milvus** and **LLM Server** start first (no dependencies)
+2. **MySQL** starts independently (no dependencies)
+3. **RAG API** starts after Milvus and LLM Server are running
+4. **n8n** starts after RAG API is running
+
+### Data Persistence
+
+All stateful services use Docker named volumes to survive container restarts and upgrades:
+
+| Volume | Service | Mount Path | Contents |
+|--------|---------|------------|----------|
+| `milvus_data` | Milvus | `/var/lib/milvus` | Vector embeddings and index data |
+| `n8n_data` | n8n | `/home/node/.n8n` | Workflow definitions and credentials |
+| `mysql_data` | MySQL | `/var/lib/mysql` | n8n_buffer database tables |
