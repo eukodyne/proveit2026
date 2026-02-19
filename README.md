@@ -9,6 +9,100 @@ This workshop demonstrates how to build and run AI-powered automation workflows 
 - **RAG Chat** — Chat with a local LLM using Retrieval-Augmented Generation. Ingest manufacturing SOPs (PDF, TXT, HTML) and ask questions answered from your own documents.
 - **MQTT Data Ingestion** — Ingest messages from MQTT topics into a local MySQL database, then chat with the collected data using the local LLM.
 
+## Getting Started
+
+Follow these steps to set up the workshop from scratch.
+
+### Step 1: Obtain a Dell Pro Max GB10
+
+You need a Dell Pro Max GB10 workstation with an NVIDIA Blackwell GPU. This machine runs all services locally — LLM inference, vector search, and workflow orchestration.
+
+### Step 2: Configure Tailscale for Remote Access
+
+Install and configure [Tailscale](https://tailscale.com/) on the Dell Pro Max GB10 so workshop participants can access it over a secure network.
+
+1. Install Tailscale on the GB10:
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up
+   ```
+2. Note the Tailscale IP address assigned to the machine (e.g., `100.91.207.62`). This is the `<ip_address>` used throughout this guide.
+3. Each participant installs Tailscale on their own laptop and joins the same Tailnet.
+
+### Step 3: Clone the Repository
+
+SSH into the Dell Pro Max GB10 and clone this repo:
+
+```bash
+ssh user@<ip_address>
+git clone https://github.com/eukodyne/proveit2026.git
+cd proveit2026
+```
+
+### Step 4: Start the Services
+
+Launch all containers with Docker Compose:
+
+```bash
+docker compose up -d
+```
+
+The first startup will pull/build all images, which may take several minutes. The vLLM server takes the longest as it loads the LLM into GPU memory.
+
+Wait for all services to be healthy:
+
+```bash
+# Check container status
+docker compose ps
+
+# Wait for the LLM server to finish loading (watch for "Application startup complete")
+docker compose logs -f llm-server
+```
+
+### Step 5: Create the MQTT Buffer Table
+
+After MySQL is running, create the table used for MQTT message ingestion:
+
+```bash
+docker exec p26-n8n-mysql mysql -uroot -ppassword n8n_buffer -e "
+CREATE TABLE IF NOT EXISTS mqtt_buffer (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    topic VARCHAR(255) NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;"
+```
+
+### Step 6: Open n8n and Import Workflows
+
+1. Open n8n in your browser: `http://<ip_address>:5678`
+2. Create an account on first launch.
+3. Import the example workflows provided in the [`examples/`](examples/) folder of this repo. Each JSON file is a complete n8n workflow that can be imported via **Settings > Import from File** in n8n.
+
+### Step 7: Verify Everything Works
+
+```bash
+# RAG API
+curl http://<ip_address>:8080/docs
+
+# Tool-Calling Proxy
+curl http://<ip_address>:8081/health
+
+# LLM Server
+curl http://<ip_address>:8000/v1/models
+
+# n8n
+curl -s -o /dev/null -w "%{http_code}" http://<ip_address>:5678
+```
+
+## Example Workflows
+
+The [`examples/`](examples/) folder contains ready-to-import n8n workflow JSON files for the workshop. To use them:
+
+1. Open n8n at `http://<ip_address>:5678`
+2. Go to a new workflow and click the three-dot menu (top right)
+3. Select **Import from File** and choose one of the JSON files from `examples/`
+
 ## Technology Stack
 
 | Component | Technology | Purpose |
@@ -300,31 +394,7 @@ cd /home/devpartner/manufacturing-rag
 docker compose up -d
 ```
 
-## n8n Workflow Setup
-
-This section documents the setup steps for configuring n8n workflows for the ProveIt2026 workshop.
-
-### Step 1: Start Services
-
-```bash
-docker compose up -d
-```
-
-### Step 2: Create the MQTT Buffer Table
-
-After the MySQL container is running, create the `mqtt_buffer` table used to store incoming MQTT messages for workflow processing:
-
-```bash
-docker exec p26-n8n-mysql mysql -uroot -ppassword n8n_buffer -e "
-CREATE TABLE IF NOT EXISTS mqtt_buffer (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    topic VARCHAR(255) NOT NULL,
-    payload TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;"
-```
-
-#### mqtt_buffer Schema
+## mqtt_buffer Schema
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -332,10 +402,6 @@ CREATE TABLE IF NOT EXISTS mqtt_buffer (
 | `topic` | VARCHAR(255) | MQTT topic the message was received on |
 | `payload` | TEXT | Message payload (typically JSON) |
 | `created_at` | TIMESTAMP | Timestamp when the row was inserted (auto-populated) |
-
-### Step 3: Configure n8n
-
-Open the n8n web interface at `http://<ip_address>:5678` and configure workflows to connect to the services above.
 
 ## Exposed Ports
 
